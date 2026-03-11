@@ -1,0 +1,37 @@
+# Logs
+*.out
+*.err
+
+# Model checkpoints
+models/
+*.pt
+*.pth
+
+# Debug / generated images
+mask_debug/
+rollouts/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Data
+*.hdf5
+*.png
+*.jpg
+*.gif
+
+# IDE / Claude
+.idea/
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env
+.env
