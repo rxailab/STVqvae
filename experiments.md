@@ -235,7 +235,7 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 ### 6. e2ecosine2
 
 **Job ID:** 20306194
-**Status:** Running
+**Status:** Finished
 **Script:** `e2ecosine2.com`
 **Node:** gpu04
 **Model files:** `e2ecosine2_best_model.pt` / `e2ecosine2_final_model.pt`
@@ -249,7 +249,15 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 
 **Hypothesis:** With the bug fixed, the policy LR stays at 3e-4 throughout while only the encoder LR decays 3e-5 -> 0. This should combine e2estable's high peak with e2ecosine's reduced collapse.
 
-**Results:** Pending.
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Best rolling avg reward (10-ep window) | **0.7982** |
+| Overall avg reward | 0.1532 |
+| Final 10-ep avg | 0.1881 |
+
+**Notes:** Hypothesis confirmed — fixing the bug raised the peak from 0.698 to 0.798 (approaching e2estable's 0.897), while the final avg (0.188) stayed close to e2ecosine (0.198). The policy LR fix allowed stronger mid-training learning without sacrificing the anti-collapse benefit. Still some late collapse but significantly less than e2estable (0.000).
 
 ---
 
@@ -262,7 +270,7 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 | e2erecon | 20289738 | Done | 0.283 | 0.000 | + recon loss + ER replay |
 | e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy: policy LR also decayed) |
 | e2ephased | 20299313 | Done | 0.594 | 0.000 | + cosine LR decay + hard freeze at 2.5M |
-| e2ecosine2 | 20306194 | Running | TBD | TBD | bug fix: cosine only on encoder, policy LR fixed |
+| e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder, policy LR fixed |
 
 ---
 
