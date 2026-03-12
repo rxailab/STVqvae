@@ -271,7 +271,8 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 | e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy: policy LR also decayed) |
 | e2ephased | 20299313 | Done | 0.594 | 0.000 | + cosine LR decay + hard freeze at 2.5M |
 | e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder, policy LR fixed |
-| ppo_cnn_baseline | 20326777 | Done | ~0.009 | 0.000 | SB3 PPO CnnPolicy, 72x72 RGB, 8 envs, 300k steps |
+| ppo_cnn_baseline | 20326777 | Done | ~0.009 | 0.000 | SB3 PPO CnnPolicy, 72x72 RGB, 8 envs, 300k steps — **buggy** (18 updates) |
+| ppo_cnn_baseline2 | 20331850 | Done | ~0.139 | ~0.069 | fixed: n_steps=128 (292 updates), eval_policies/train_policy.py |
 
 ---
 
@@ -327,6 +328,65 @@ Training rollout reward progression:
 | 300,000 | 0.000 | 262 |
 
 **Notes:** The CNN baseline completely failed to solve the task in 300k steps. Episode lengths grew over time (agent wandering longer) but reward never meaningfully exceeded 0. The "New best mean reward!" logged at step 240k was SB3 saving a model with 0.0 eval reward (first eval). This is a strong result for the VQVAE approach — even our baseline VQVAE run (e2ebaseline) peaked at 0.397 within the same compute budget, and e2estable hit 0.897. The structured discrete representation from VQVAE appears significantly more sample-efficient than raw pixel CNN for this sparse-reward task.
+
+---
+
+### 8. ppo_cnn_baseline2
+
+**Job ID:** 20331850
+**Status:** Finished
+**Script:** `ppo_cnn_baseline2.com`
+**Node:** gpu06
+**Model files:** `models/.../ppo_cnn_baseline2_final.zip`, `logs/best_model.zip`
+
+**Framework:** Stable-Baselines3 PPO via `eval_policies/train_policy.py`
+
+**Key fixes vs ppo_cnn_baseline:**
+
+| Fix | Before | After |
+|---|---|---|
+| Script | custom (unreliable obs) | `eval_policies/train_policy.py` (correct `make_env` + `SB3ObsWrapper`) |
+| `n_steps` | 2048 → 18 PPO updates | **128 → 292 PPO updates** |
+| `eval_freq` | 30,000 (1 eval total) | 10,000 (30 eval checkpoints) |
+
+**Setup (all other params as specified):**
+
+| Parameter | Value |
+|---|---|
+| Policy | CnnPolicy (NatureCNN) |
+| Obs | (3, 72, 72) uint8 via `make_env` + `SB3ObsWrapper` |
+| Parallel envs | 8 x DummyVecEnv |
+| Total steps | 300,000 |
+| `n_steps` | 128 |
+| `batch_size` | 64 |
+| `n_epochs` | 10 |
+| `learning_rate` | 3e-4 |
+| `gamma` | 0.99 |
+| `gae_lambda` | 0.95 |
+| `clip_range` | 0.2 |
+| `ent_coef` | 0.0 |
+| `vf_coef` | 0.5 |
+
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Peak `ep_rew_mean` (training) | **~0.139** (step ~241k) |
+| Final `ep_rew_mean` (training) | ~0.069 |
+| Best eval checkpoint reward | 0.000 (deterministic eval on fixed seeds) |
+
+Training reward progression:
+
+| Timestep | `ep_rew_mean` |
+|---|---|
+| 10k | 0.014 |
+| 58k | 0.038 |
+| 157k | 0.058 |
+| 199k | 0.097 |
+| 241k | **0.139** (peak) |
+| 297k | 0.069 |
+
+**Notes:** The fix worked — the agent genuinely learns now (vs flat 0 in v1). Training reward peaks at ~0.139 (~14% success rate) at step 241k. Eval reward stays at 0.0 because the deterministic policy applied to fixed eval seeds fails to generalize. The VQVAE e2e approach still vastly outperforms this (e2ebaseline peaks at 0.397 with the same 300k step budget). The structured VQVAE representation is significantly more sample-efficient than raw pixels for this sparse-reward task.
 
 ---
 
