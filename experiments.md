@@ -271,6 +271,42 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 | e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy: policy LR also decayed) |
 | e2ephased | 20299313 | Done | 0.594 | 0.000 | + cosine LR decay + hard freeze at 2.5M |
 | e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder, policy LR fixed |
+| ppo_cnn_baseline | 20326777 | Running | TBD | TBD | SB3 PPO CnnPolicy, 72x72 RGB, 8 envs, 300k steps |
+
+---
+
+### 7. ppo_cnn_baseline
+
+**Job ID:** 20326777
+**Status:** Running
+**Script:** `ppo_cnn_baseline.com`
+**Node:** gpu06
+**Model files:** `ppo_cnn_baseline_best/best_model.zip` / `ppo_cnn_baseline_final.zip`
+
+**Framework:** Stable-Baselines3 PPO (independent comparison — no VQVAE)
+
+**Setup:**
+
+| Parameter | Value |
+|---|---|
+| Policy | CnnPolicy (NatureCNN) |
+| Obs | 72x72x3 RGB (RGBImgObsWrapper + ImgObsWrapper) |
+| Parallel envs | 8 x DummyVecEnv |
+| Total steps | 300,000 |
+| Eval freq | every 30,000 steps, 20 episodes |
+| `learning_rate` | 3e-4 |
+| `n_steps` | 2048 |
+| `batch_size` | 64 |
+| `n_epochs` | 10 |
+| `gamma` | 0.99 |
+| `gae_lambda` | 0.95 |
+| `clip_range` | 0.2 |
+| `ent_coef` | 0.0 |
+| `vf_coef` | 0.5 |
+
+**Purpose:** Establish a direct pixel-based CNN PPO baseline for comparison against the VQVAE e2e approach. 300k steps is much shorter than the 5M VQVAE runs — serves as a lower-bound / sanity check on what raw CNN PPO achieves on this env.
+
+**Results:** Pending.
 
 ---
 
