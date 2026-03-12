@@ -261,6 +261,71 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 
 ---
 
+### 8. e2eema
+
+**Status:** Finished
+**Script:** `discrete_mbrl/model_free/train.py`
+**Hardware:** RTX 4090 (local, direct run — no SLURM)
+**Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/e2eema_best_model.pt` / `e2eema_final_model.pt`
+**Log:** `/home/xiar3/experiments/e2eema.log`
+
+**Full command:**
+```bash
+python train.py \
+  --env_name MiniGrid-LavaCrossingS9N1-v0 \
+  --ae_model_type vqvae --ae_model_version 2 \
+  --codebook_size 64 --embedding_dim 64 --filter_size 9 \
+  --mf_steps 5000000 --batch_size 512 \
+  --num_envs 16 \
+  --e2e_loss --encoder_lr 3e-5 --encoder_lr_cosine \
+  --encoder_ema_tau 0.995 \
+  --ppo_iters 10 --ppo_batch_size 64 \
+  --ppo_entropy_coef 0.01 --ppo_gae_lambda 0.95 \
+  --ppo_norm_advantages --ppo_max_grad_norm 0.5 \
+  --entropy_penalty_coef 0.05 --ortho_init \
+  --run_name e2eema --device cuda --save
+```
+
+**Key changes vs e2ecosine2:**
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| `encoder_ema_tau` | 0.995 | **EMA target encoder** — slow-moving copy (τ=0.995) of online encoder; rollout collection and PPO value bootstrapping use the stable target encoder; PPO gradients still flow through online encoder only |
+| `num_envs` | 16 | Vectorized parallel environments (`SyncVectorEnv`) — fixes GPU underutilization (7% → ~30%), throughput 666 → ~1130 env steps/sec |
+| `batch_size` | 512 | Doubled from 256 to accommodate 16 envs × 32 steps per update |
+
+**Infrastructure changes (new code):**
+- `env_helpers.py`: Added `make_vec_env()` using `gymnasium.vector.SyncVectorEnv`
+- `train.py`: Added `_ema_update()` helper, target encoder creation (`deepcopy` of raw ae_model, frozen, eval mode), vectorized rollout path
+- `ppo.py`: Added `target_ae` parameter to `PPOTrainer` for stable bootstrap values
+- `rl_utils.py`: Added `--num_envs` and `--encoder_ema_tau` CLI arguments
+
+**Hypothesis:** An EMA target encoder (borrowed from DQN target network) gives the policy a stable input distribution during rollouts and value bootstrapping, directly addressing the root cause of policy collapse — encoder drift under PPO gradients. The online encoder still learns via e2e gradients, but the policy never sees its drifting outputs.
+
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Best rolling avg reward (10-ep window) | **0.6625** |
+| Overall avg reward | 0.0931 |
+| Final 10-ep avg | 0.0000 |
+
+**Notes:** Policy still collapsed to 0 by end of training despite the EMA target encoder. Peak (0.6625) is lower than e2ecosine2 (0.798) and e2estable (0.897). The EMA target encoder did not prevent collapse — the online encoder still drifts under PPO gradients, which eventually corrupts the codebook EMA. The target encoder, being a slow copy of the online encoder, follows the drift with a delay but does not stop it. Also note: the combined effect of `encoder_lr_cosine` + `encoder_ema_tau=0.995` may have been too aggressive — annealing the encoder LR to 0 while also delaying gradient feedback via EMA possibly slowed early learning without improving stability.
+
+---
+
+### 7. ppo_cnn_baseline (SB3)
+
+**Status:** Done
+**Script:** N/A (Stable Baselines 3)
+**Model file:** `discrete_mbrl/trained_models/MiniGrid-LavaCrossingS9N1-v0/ppo_cnn_baseline.sb3`
+
+**Description:** Standard PPO with CNN feature extractor trained via Stable Baselines 3. No VQVAE — raw pixel observations fed directly to a CNN policy. Serves as the reference baseline to measure the contribution of the discrete representation.
+
+**Results:** TBD
+
+---
+
 ## Summary Comparison
 
 | Experiment | Job ID | Status | Best Reward | Final Avg | Key Change |
@@ -270,7 +335,9 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 | e2erecon | 20289738 | Done | 0.283 | 0.000 | + recon loss + ER replay |
 | e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy: policy LR also decayed) |
 | e2ephased | 20299313 | Done | 0.594 | 0.000 | + cosine LR decay + hard freeze at 2.5M |
-| e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder, policy LR fixed |
+| e2ecosine2 | 20306194 | Done | 0.798 | **0.188** | bug fix: cosine only on encoder, policy LR fixed |
+| e2eema | — (local) | Done | 0.663 | 0.000 | + EMA target encoder (τ=0.995) + 16 vec envs |
+| ppo_cnn_baseline | — | Done | TBD | TBD | SB3 PPO + CNN baseline (no VQVAE) |
 
 ---
 
@@ -286,4 +353,5 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 - **e2ephased** — hard freeze at 2.5M did not prevent collapse; policy became unstable in phase 2 even with frozen encoder.
 - **Best peak** (0.897) still belongs to e2estable; best sustained performance belongs to e2ecosine.
 - **Bug found in e2ecosine:** `CosineAnnealingLR` was applied to the whole optimizer, annealing both encoder AND policy/critic LR to 0. This suppressed policy learning and explains the lower peak (0.698 vs 0.897). Fixed in train.py to use `LambdaLR` targeting only the encoder param group.
-- **e2ecosine2** tests the corrected implementation — expect higher peak (like e2estable) AND reduced collapse (like e2ecosine).
+- **e2ecosine2** confirmed the bug fix — higher peak (0.798) AND reduced collapse (0.188 final), combining benefits of both.
+- **e2eema** — EMA target encoder (τ=0.995) with 16 vectorized envs did NOT prevent collapse (final = 0.000, peak = 0.663). The target encoder follows the online encoder's drift with a delay but cannot stop it. The combination of cosine LR annealing + EMA feedback delay may have hampered early learning. Root cause of collapse remains unresolved.
