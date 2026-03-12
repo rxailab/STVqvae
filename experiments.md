@@ -271,7 +271,7 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 | e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy: policy LR also decayed) |
 | e2ephased | 20299313 | Done | 0.594 | 0.000 | + cosine LR decay + hard freeze at 2.5M |
 | e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder, policy LR fixed |
-| ppo_cnn_baseline | 20326777 | Running | TBD | TBD | SB3 PPO CnnPolicy, 72x72 RGB, 8 envs, 300k steps |
+| ppo_cnn_baseline | 20326777 | Done | ~0.009 | 0.000 | SB3 PPO CnnPolicy, 72x72 RGB, 8 envs, 300k steps |
 
 ---
 
@@ -306,7 +306,27 @@ Output: 81 spatial positions × 64-dim embedding = **5184-dim quantized state**
 
 **Purpose:** Establish a direct pixel-based CNN PPO baseline for comparison against the VQVAE e2e approach. 300k steps is much shorter than the 5M VQVAE runs — serves as a lower-bound / sanity check on what raw CNN PPO achieves on this env.
 
-**Results:** Pending.
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Best `ep_rew_mean` (training) | ~0.009 (step ~262k, transient) |
+| Final eval mean reward | **0.0000** |
+| Eval at 240k steps | 0.0000 |
+| Runtime | ~13 minutes |
+
+Training rollout reward progression:
+
+| Timestep | `ep_rew_mean` | `ep_len_mean` |
+|---|---|---|
+| 16,384 | 0.000 | 121 |
+| 32,768 | 0.008 | 174 |
+| 49,152 | 0.004 | 220 |
+| 65,536+ | 0.000 | 231–304 |
+| 262,144 | 0.009 | 274 |
+| 300,000 | 0.000 | 262 |
+
+**Notes:** The CNN baseline completely failed to solve the task in 300k steps. Episode lengths grew over time (agent wandering longer) but reward never meaningfully exceeded 0. The "New best mean reward!" logged at step 240k was SB3 saving a model with 0.0 eval reward (first eval). This is a strong result for the VQVAE approach — even our baseline VQVAE run (e2ebaseline) peaked at 0.397 within the same compute budget, and e2estable hit 0.897. The structured discrete representation from VQVAE appears significantly more sample-efficient than raw pixel CNN for this sparse-reward task.
 
 ---
 
