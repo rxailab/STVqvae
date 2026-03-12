@@ -1122,3 +1122,13 @@ def make_env(env_name, replay_buffer=None, buffer_lock=None, extra_info=None,
 
     env = SeedCompatWrapper(env)
     return env
+
+
+def make_vec_env(env_name, num_envs, **kwargs):
+    """Create a SyncVectorEnv with num_envs parallel copies of make_env."""
+    from gymnasium.vector import SyncVectorEnv
+    fns = [
+        (lambda n=env_name, kw=kwargs: make_env(n, **kw))
+        for _ in range(num_envs)
+    ]
+    return SyncVectorEnv(fns)

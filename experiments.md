@@ -314,6 +314,201 @@ python train.py \
 
 ---
 
+### 9. e2esnapback
+
+**Status:** Done ✅
+**Script:** `discrete_mbrl/model_free/train.py`
+**Hardware:** RTX 4090 (local, direct run — no SLURM)
+**Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/e2esnapback_best_model.pt` / `e2esnapback_final_model.pt`
+**Log:** `/home/xiar3/experiments/e2esnapback.log`
+
+**Full command:**
+```bash
+python train.py \
+  --env_name MiniGrid-LavaCrossingS9N1-v0 \
+  --ae_model_type vqvae --ae_model_version 2 \
+  --codebook_size 64 --embedding_dim 64 --filter_size 9 \
+  --mf_steps 5000000 --batch_size 4096 \
+  --num_envs 16 \
+  --e2e_loss --encoder_lr 3e-5 \
+  --encoder_snapback --snapback_threshold 0.5 --snapback_patience 100 --snapback_min_reward 0.6 \
+  --ppo_iters 10 --ppo_batch_size 64 \
+  --ppo_entropy_coef 0.01 --ppo_gae_lambda 0.95 \
+  --ppo_norm_advantages --ppo_max_grad_norm 0.5 \
+  --entropy_penalty_coef 0.05 --ortho_init \
+  --run_name e2esnapback --device cuda --save
+```
+
+**Changes vs e2estable:**
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| `num_envs` | 16 | Vectorized envs for GPU utilization |
+| `batch_size` | **4096** | 16 envs × 256 steps/env = identical per-env trajectory length to e2estable |
+| `encoder_snapback` | True | Adaptive encoder snapback (see below) |
+| `snapback_threshold` | 0.5 | Trigger when rolling avg drops below 50% of peak |
+| `snapback_patience` | 100 | 100 consecutive declining episodes before triggering |
+| `snapback_min_reward` | 0.6 | Don't activate until peak ≥ 0.6 (avoids noise-triggered early freeze) |
+| `encoder_lr_cosine` | False | Removed — cosine reduced peak (0.798 vs 0.897) |
+| `encoder_ema_tau` | 1.0 | Removed — EMA didn't help |
+
+---
+
+#### What went wrong in all previous local runs (root cause analysis)
+
+Every local experiment before this one (e2eema, e2esnapback v1, v2) peaked in the range 0.29–0.66 despite the HPC run e2estable reaching 0.897. Two bugs in the vectorized rollout were responsible.
+
+**Bug 1 — Trajectory too short (`batch_size=512` with `num_envs=16`)**
+
+With 16 environments and `batch_size=512`, each env only rolled out for `512 / 16 = 32 steps` before a PPO update. This environment has episodes up to 500 steps long. Consequences:
+- Almost every trajectory segment was truncated mid-episode (never reached a terminal state)
+- The GAE bootstrap was called at every 32nd step with a noisy critic value estimate
+- Effective credit assignment horizon was tiny — the agent couldn't learn from episode-length consequences
+- PPO was seeing almost exclusively mid-episode fragments, never complete episodes
+
+This alone dropped the peak from ~0.9 to 0.47. Fix: `batch_size=4096` → 256 steps per env, matching e2estable's single-env rollout length.
+
+**Bug 2 — Cross-env GAE contamination (interleaved transition ordering)**
+
+The vectorized rollout stored transitions in time-interleaved order:
+```
+buffer = [t0·e0, t0·e1, ..., t0·e15,  t1·e0, t1·e1, ..., t1·e15,  ...]
+position:    0     1          15          16     17          31
+```
+
+PPO's GAE computation processes this as a single sequential trajectory — treating position 1 (`t0·e1`, env 1's obs at timestep 0) as the "next state" after position 0 (`t0·e0`, env 0's obs at timestep 0). These are from completely different environments with no temporal relationship. The GAE backward pass:
+```python
+gae[i] = delta[i] + lambda * gamma[i] * gae[i+1]  # gae[i+1] is from a different env!
+```
+corrupted every single advantage estimate. The `gamma[i]` mask (which zeros out at episode ends) only partially contained the damage since episodes rarely ended exactly at t0.
+
+Fix: collect all `T` timesteps as `[T, N, ...]` tensors, then:
+1. **Bootstrap**: for each env that didn't terminate at step T, compute `V(next_obs)` and add `gamma * V` to that env's last reward, then set its gamma to 0
+2. **Permute**: reshape `[T, N, ...] → [N, T, ...] → [N×T, ...]` (env-major order)
+
+Env-major ordering puts env 0's full 256-step trajectory first, env 1's next, etc. The `gamma=0` at each env boundary (from the bootstrap step) ensures GAE's backward pass stops at every boundary and never bleeds from one env into another.
+
+**Impact of each fix:**
+
+| Fix applied | Peak reward |
+|---|---|
+| Neither (batch_size=512, interleaved) | 0.293 – 0.663 |
+| Bug 1 only (batch_size=4096, still interleaved) | 0.473 |
+| Both bugs fixed | **0.9988** |
+
+The combination recovered e2estable's peak and then exceeded it.
+
+---
+
+#### What the snapback mechanism does
+
+After each PPO batch, the code checks every completed episode:
+1. If the current 10-episode rolling avg is a new best AND ≥ `snapback_min_reward` gate: save a copy of the encoder's `state_dict`
+2. If the current avg has been below `best × snapback_threshold` for `snapback_patience` consecutive episodes: restore the encoder to the saved best state_dict and permanently freeze it (set `requires_grad=False` on all encoder params, zero out encoder LR)
+
+The `snapback_min_reward=0.6` gate prevents activation during the noisy early phase when rolling avg swings between 0 and 0.3. Without it, a 10-episode window average of 0.1 dropping to 0.0 (which happens constantly when success rate is 10%) would trigger a premature freeze.
+
+```python
+# Simplified logic:
+if current_avg > best_avg and current_avg > min_reward:
+    best_avg = current_avg
+    best_encoder_sd = deepcopy(encoder.state_dict())
+
+if current_avg < best_avg * threshold:
+    decline_count += 1
+    if decline_count >= patience:
+        encoder.load_state_dict(best_encoder_sd)  # restore
+        freeze(encoder)                            # permanent freeze
+        train_encoder = False
+```
+
+---
+
+#### Results
+
+| Metric | Value |
+|---|---|
+| **Best rolling avg (10-ep window)** | **0.9988** 🏆 (new all-time best; e2estable was 0.897) |
+| Snapback triggered at step | 4,160,736 (~83% into training) |
+| Rolling avg at trigger | 0.199 (< 0.5 × 0.9988 = 0.499) |
+| **Final 10-ep avg** | **0.3995** |
+| vs e2estable final | 0.3995 vs 0.000 — snapback prevented total collapse |
+
+**Phase-by-phase breakdown:**
+- **Phase 1 (steps 0–4.16M):** Full e2e training with corrected GAE. Encoder and policy both learn. Peak climbs steadily to 0.9988.
+- **Phase 2 (step 4.16M):** Collapse begins. Rolling avg drops from ~0.9988 to 0.199 over ~100 episodes. Snapback fires: encoder restored to peak state_dict and frozen.
+- **Phase 3 (steps 4.16M–5M):** Only ~840k steps of policy training with frozen encoder. Policy partially recovers to 0.3995 final.
+
+**What limited Phase 3:** Only 17% of training budget remained after snapback triggered. With a fixed encoder, the policy needs many more steps to re-optimise from scratch on the stable representation. Next experiment (frozen VQVAE from start) directly addresses this — the encoder is always fixed, so all 5M steps are pure policy training.
+
+---
+
+### 10. vqvae_pretrain_ppo
+
+**Status:** Running
+**Script:** `discrete_mbrl/collect_data.py` → `discrete_mbrl/train_encoder.py` → `discrete_mbrl/model_free/train.py`
+**Hardware:** RTX 4090 (local, direct run — no SLURM)
+**Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/vqvae_pretrain_ppo_best_model.pt`
+**Log:** `/home/xiar3/experiments/vqvae_pretrain_ppo.log`
+
+**Motivation:** In e2esnapback, Phase 3 (policy training on frozen encoder) recovered to 0.3995 in only 840k steps. If we start with a frozen, pre-trained VQVAE encoder from step 0, all 5M steps are pure policy training on a stable representation. The key question is whether a reconstruction-trained VQVAE (no RL signal) provides a good enough representation for PPO to learn from.
+
+**Three-phase pipeline:**
+
+**Phase 1 — Data collection** (`collect_data.py`):
+```bash
+cd discrete_mbrl
+python collect_data.py \
+  -e MiniGrid-LavaCrossingS9N1-v0 \
+  -n 8 -s 200000 -a random
+```
+Collects 200k transitions using a random policy → saved to `./data/MiniGrid-LavaCrossingS9N1-v0_replay_buffer.hdf5`.
+
+**Phase 2 — VQVAE pretraining** (`train_encoder.py`):
+```bash
+python train_encoder.py \
+  -e MiniGrid-LavaCrossingS9N1-v0 \
+  --ae_model_type vqvae --ae_model_version 2 \
+  --codebook_size 64 --embedding_dim 64 --filter_size 9 \
+  --epochs 50 --batch_size 64 --learning_rate 1e-4 \
+  --save
+```
+Trains VQVAE on collected observations using reconstruction loss only (no RL signal). Saved to `./models/MiniGrid-LavaCrossingS9N1-v0/model_{hash}.pt`.
+
+**Phase 3 — PPO with frozen VQVAE** (`model_free/train.py`):
+```bash
+cd model_free
+python train.py \
+  --env_name MiniGrid-LavaCrossingS9N1-v0 \
+  --ae_model_type vqvae --ae_model_version 2 \
+  --codebook_size 64 --embedding_dim 64 --filter_size 9 \
+  --mf_steps 5000000 --batch_size 4096 \
+  --num_envs 16 \
+  --ppo_iters 10 --ppo_batch_size 64 \
+  --ppo_entropy_coef 0.01 --ppo_gae_lambda 0.95 \
+  --ppo_norm_advantages --ppo_max_grad_norm 0.5 \
+  --ortho_init \
+  --model_dir .. \
+  --run_name vqvae_pretrain_ppo --device cuda --save
+```
+**No `--e2e_loss` flag** → encoder frozen from step 0. Loads pretrained VQVAE via hash-matched path. Only policy and critic weights are updated.
+
+**Key differences vs all previous experiments:**
+
+| Aspect | e2e experiments (1–9) | vqvae_pretrain_ppo (10) |
+|---|---|---|
+| Encoder training | PPO gradients flow through encoder | **Encoder frozen from step 0** |
+| Representation source | RL signal shapes the embedding | **Reconstruction loss only** |
+| Encoder drift | Inevitable (caused all collapses) | **Impossible** (no gradients) |
+| Policy training budget | Shared with encoder training | **Full 5M steps** |
+| Risk | Encoder collapses representation | Representation may not be task-relevant |
+
+**Hypothesis:** A reconstruction-trained VQVAE on random-policy observations captures the environment's visual structure (object positions, colors, layout). This is sufficient for PPO to learn a navigation policy because the task-relevant information (agent position, lava position, goal position) is all present in the observations — PPO just needs to learn to read it. With no encoder drift, policy training should be stable throughout all 5M steps, potentially achieving better final performance than any e2e experiment.
+
+**Results:** TBD
+
+---
+
 ### 7. ppo_cnn_baseline (SB3)
 
 **Status:** Done
@@ -331,27 +526,41 @@ python train.py \
 | Experiment | Job ID | Status | Best Reward | Final Avg | Key Change |
 |---|---|---|---|---|---|
 | e2ebaseline | 20279173 | Done | 0.397 | 0.000 | Baseline |
-| e2estable | 20289278 | Done | **0.897** | 0.000 | PPO stability + separate encoder LR |
-| e2erecon | 20289738 | Done | 0.283 | 0.000 | + recon loss + ER replay |
-| e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy: policy LR also decayed) |
-| e2ephased | 20299313 | Done | 0.594 | 0.000 | + cosine LR decay + hard freeze at 2.5M |
-| e2ecosine2 | 20306194 | Done | 0.798 | **0.188** | bug fix: cosine only on encoder, policy LR fixed |
-| e2eema | — (local) | Done | 0.663 | 0.000 | + EMA target encoder (τ=0.995) + 16 vec envs |
+| e2estable | 20289278 | Done | 0.897 | 0.000 | PPO stability + separate encoder LR |
+| e2erecon | 20289738 | Done | 0.283 | 0.000 | + recon loss (hurt performance) |
+| e2ecosine | 20299312 | Done | 0.698 | 0.198 | + cosine LR decay (buggy) |
+| e2ephased | 20299313 | Done | 0.594 | 0.000 | + hard freeze at 2.5M |
+| e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder |
+| e2eema | — (local) | Done | 0.663 | 0.000 | EMA target encoder — two GAE bugs masked real performance |
+| **e2esnapback** | — (local) | **Done** ✅ | **0.9988** 🏆 | **0.3995** | Fixed 2 GAE bugs + snapback; new best; snapback triggered at 83% leaving only 840k steps to recover |
+| **vqvae_pretrain_ppo** | — (local) | **Running** | TBD | TBD | Pretrain VQVAE on random data, freeze, train PPO — eliminates encoder drift entirely |
 | ppo_cnn_baseline | — | Done | TBD | TBD | SB3 PPO + CNN baseline (no VQVAE) |
 
 ---
 
 ## Observations
 
-- **Policy collapse** is a recurring issue: both finished runs achieve 0.0 final avg despite strong mid-training peaks. The best checkpoint is not the last.
-- **Root cause identified:** encoder drift — the VQVAE encoder keeps receiving PPO gradients past the performance peak, destroying the learned representation. The codebook EMA chases drifted encoder outputs, breaking the policy's input distribution.
-- **Separate encoder LR** (3e-5 vs 3e-4) appears critical — the single biggest factor enabling e2estable's improvement.
-- **GAE + gradient clipping + ortho init** together provide the PPO stability needed to sustain learning longer.
-- **Reward scale:** successful episodes yield ~0.97 reward; failures yield 0.0 (binary success signal).
-- **e2ecosine** achieved the best *final* avg (0.198) — cosine LR decay significantly reduced collapse severity vs all other runs.
-- **e2erecon** was the worst — reconstruction loss competes with RL, slowing and limiting learning.
-- **e2ephased** — hard freeze at 2.5M did not prevent collapse; policy became unstable in phase 2 even with frozen encoder.
-- **Best peak** (0.897) still belongs to e2estable; best sustained performance belongs to e2ecosine.
-- **Bug found in e2ecosine:** `CosineAnnealingLR` was applied to the whole optimizer, annealing both encoder AND policy/critic LR to 0. This suppressed policy learning and explains the lower peak (0.698 vs 0.897). Fixed in train.py to use `LambdaLR` targeting only the encoder param group.
-- **e2ecosine2** confirmed the bug fix — higher peak (0.798) AND reduced collapse (0.188 final), combining benefits of both.
-- **e2eema** — EMA target encoder (τ=0.995) with 16 vectorized envs did NOT prevent collapse (final = 0.000, peak = 0.663). The target encoder follows the online encoder's drift with a delay but cannot stop it. The combination of cosine LR annealing + EMA feedback delay may have hampered early learning. Root cause of collapse remains unresolved.
+### Core failure mode: encoder drift
+Policy collapse is universal in all e2e experiments — the VQVAE encoder keeps receiving PPO gradients past the performance peak. The codebook EMA chases drifted encoder outputs, breaking the policy's input distribution. Every technique to slow encoder drift (lower LR, cosine decay, EMA target) merely delayed collapse; none stopped it.
+
+### What actually fixed local performance (e2esnapback)
+Two bugs in the vectorized rollout code caused all local experiments to peak at 0.29–0.66 despite the HPC run reaching 0.897:
+1. **Trajectory length**: `batch_size=512 / num_envs=16 = 32 steps/env` — all rollouts truncated mid-episode. Fix: `batch_size=4096 → 256 steps/env`.
+2. **Cross-env GAE contamination**: transitions stored in time-interleaved order made PPO's GAE backward pass use adjacent-env deltas as temporal successors. Fix: env-major ordering `[N, T, ...]` with `gamma=0` at env boundaries.
+
+After both fixes: peak jumped from 0.473 → **0.9988**, exceeding e2estable's 0.897.
+
+### What worked and what didn't
+| Technique | Effect |
+|---|---|
+| Separate encoder LR (3e-5) | ✅ Single biggest factor — allows policy to learn faster than encoder drifts |
+| GAE (λ=0.95) + grad clipping + ortho init | ✅ PPO stability, required for high peaks |
+| Cosine encoder LR decay | ✅ Reduces final collapse but caps peak at 0.798 |
+| Reconstruction loss (e2erecon) | ❌ Competed with RL, worst result (0.283 peak) |
+| Hard freeze at 2.5M (e2ephased) | ❌ Representation already degraded before freeze point |
+| EMA target encoder | ❌ Target follows online drift with delay — doesn't stop it |
+| **Snapback** | ✅ Prevented total collapse (0.000 → 0.3995 final) but Phase 3 too short (840k steps) |
+| **GAE bugs fixed** | ✅ Unlocked full performance — peak 0.9988, new best |
+
+### Open question
+With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k steps and reached 0.3995. This suggests the stable-encoder phase needs more budget. `vqvae_pretrain_ppo` tests the extreme case: all 5M steps are pure policy training on a reconstruction-trained frozen VQVAE.

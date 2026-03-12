@@ -45,12 +45,14 @@ class PPOTrainer():
       self, env, policy, critic, ae, optimizer,
       epsilon=1e-7, ppo_iters=20, ppo_clip=0.2, value_coef=0.5,
       minibatch_size=32, entropy_coef=0.003, gae_lambda=0,
-      norm_advantages=False, max_grad_norm=0.5, e2e_loss=False
+      norm_advantages=False, max_grad_norm=0.5, e2e_loss=False,
+      target_ae=None,
     ):
     self.n_acts = env.action_space.n
     self.policy = policy
     self.critic = critic
     self.ae = ae
+    self.target_ae = target_ae  # stable EMA encoder for bootstrapping; None = use self.ae
     self.optimizer = optimizer
     self.device = next(self.policy.parameters()).device
     self.epsilon = epsilon
@@ -94,9 +96,10 @@ class PPOTrainer():
     self.policy.train()
 
     # Bootstrap rewards if episode is not done
+    _stable_ae = self.target_ae if self.target_ae is not None else self.ae
     if batch_data['gammas'][-1] > 0:
       with torch.no_grad():
-        next_state = self.ae.encode(
+        next_state = _stable_ae.encode(
           batch_data['next_obs'][-1:].to(self.device),
           return_one_hot=True)
         next_value = self.critic(next_state).squeeze()
@@ -129,7 +132,7 @@ class PPOTrainer():
         advantages = returns - values
     else:
       with torch.no_grad():
-        last_state = self.ae.encode(
+        last_state = _stable_ae.encode(
           batch_data['next_obs'][-1:].to(self.device),
           return_one_hot=True)
         last_value = self.critic(last_state).squeeze(dim=0)

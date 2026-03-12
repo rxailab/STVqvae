@@ -49,6 +49,27 @@ def make_mf_arg_parser():
                       help='Cosine anneal encoder LR from encoder_lr to 0 over mf_steps.')
   parser.add_argument('--freeze_encoder_after', type=int, default=-1,
                       help='Freeze encoder after this many env steps (-1 = never).')
+  parser.add_argument('--num_envs', type=int, default=1,
+                      help='Number of parallel environments for rollout collection. '
+                           '>1 enables vectorized envs for better GPU utilization.')
+  parser.add_argument('--encoder_ema_tau', type=float, default=1.0,
+                      help='EMA decay for target encoder (e.g. 0.995). '
+                           '1.0 = disabled (no target encoder). '
+                           'When < 1.0, rollout uses stable target encoder; '
+                           'PPO gradients still flow through online encoder.')
+  parser.add_argument('--encoder_snapback', action='store_true', default=False,
+                      help='Enable adaptive encoder snapback: save encoder weights at each '
+                           'new best reward, restore & freeze when performance declines.')
+  parser.add_argument('--snapback_threshold', type=float, default=0.5,
+                      help='Freeze encoder when rolling avg drops below best * threshold '
+                           '(default 0.5 = 50%% of peak).')
+  parser.add_argument('--snapback_patience', type=int, default=100,
+                      help='Number of consecutive declining episodes before triggering '
+                           'snapback (default 100).')
+  parser.add_argument('--snapback_min_reward', type=float, default=0.0,
+                      help='Minimum best rolling avg before snapback monitoring activates. '
+                           'Prevents premature freezing during early noisy training. '
+                           '(default 0.0 = no gate).')
   parser.add_argument('--run_name', type=str, default=None,
                       help='Prefix for saved model filenames, e.g. "e2ephased" saves '
                            'e2ephased_best_model.pt / e2ephased_final_model.pt.')

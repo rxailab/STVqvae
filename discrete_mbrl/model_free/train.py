@@ -1,4 +1,5 @@
 from collections import defaultdict
+import copy
 import os
 import sys
 
@@ -26,17 +27,20 @@ from env_helpers import *
 from training_helpers import *
 from model_construction import *
 from rl_utils import *
+from env_helpers import make_vec_env
 
 
-def save_best_model(ae_model, policy, critic, optimizer, step, args, avg_reward, suffix="best"):
+def save_best_model(ae_model, policy, critic, optimizer, step, args, avg_reward, suffix="best", target_ae=None):
     """
     Save a checkpoint. Filename: {run_name}_{suffix}_model.pt if run_name is set,
     else {suffix}_model.pt (backward compatible).
     """
+    _raw_ae_save = getattr(ae_model, '_orig_mod', ae_model)
     checkpoint = {
         'step': int(step),
         'avg_reward': float(avg_reward),
-        'ae_model_state_dict': ae_model.state_dict(),
+        'ae_model_state_dict': _raw_ae_save.state_dict(),
+        'target_ae_state_dict': target_ae.state_dict() if target_ae is not None else None,
         'policy_state_dict': policy.state_dict(),
         'critic_state_dict': critic.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
@@ -86,6 +90,49 @@ def _unfreeze_params(model: torch.nn.Module):
         p.requires_grad = True
 
 
+def _snapback_check(current_avg, best_avg, threshold, decline_count, patience,
+                     ae_model, best_encoder_sd, train_encoder, encoder_scheduler, step,
+                     min_reward=0.0):
+    """Check if encoder should be snapped back to best state and frozen.
+
+    Returns (decline_count, train_encoder, encoder_scheduler, frozen_flag).
+    """
+    if best_avg <= 0 or best_encoder_sd is None:
+        return 0, train_encoder, encoder_scheduler, False
+
+    # Don't activate until best_avg exceeds min_reward gate
+    if best_avg < min_reward:
+        return 0, train_encoder, encoder_scheduler, False
+
+    if current_avg < best_avg * threshold:
+        decline_count += 1
+    else:
+        decline_count = 0
+
+    if decline_count >= patience and train_encoder:
+        # Restore encoder to best state and freeze
+        raw_ae = getattr(ae_model, '_orig_mod', ae_model)
+        raw_ae.load_state_dict(best_encoder_sd)
+        _freeze_params(ae_model)
+        ae_model.eval()
+        train_encoder = False
+        encoder_scheduler = None
+        print(f"\n[SNAPBACK step {step}] Encoder restored to best state and frozen! "
+              f"(current_avg={current_avg:.4f}, best_avg={best_avg:.4f}, "
+              f"threshold={threshold}, decline_count={decline_count})")
+        return 0, train_encoder, encoder_scheduler, True
+
+    return decline_count, train_encoder, encoder_scheduler, False
+
+
+def _ema_update(online: torch.nn.Module, target: torch.nn.Module, tau: float):
+    """Update target encoder weights: target = tau*target + (1-tau)*online."""
+    online_raw = getattr(online, '_orig_mod', online)
+    with torch.no_grad():
+        for p_on, p_tgt in zip(online_raw.parameters(), target.parameters()):
+            p_tgt.data.mul_(tau).add_((1.0 - tau) * p_on.data)
+
+
 def train(args, encoder_model=None):
     env = make_env(args.env_name, max_steps=args.env_max_steps)
     act_space = env.action_space
@@ -111,6 +158,19 @@ def train(args, encoder_model=None):
         ae_trainer = None
 
     ae_model = _maybe_compile(ae_model, "ae_model")
+
+    # EMA target encoder: stable copy used for rollout & PPO value bootstrapping.
+    # Gradients still flow through the online ae_model during PPO updates.
+    ema_tau = getattr(args, 'encoder_ema_tau', 1.0)
+    _raw_ae = getattr(ae_model, '_orig_mod', ae_model)
+    target_ae = copy.deepcopy(_raw_ae).to(args.device)
+    _freeze_params(target_ae)
+    target_ae.eval()
+    use_ema = (ema_tau < 1.0)
+    if use_ema:
+        print(f'EMA target encoder enabled (tau={ema_tau})')
+    else:
+        print('EMA target encoder disabled (tau=1.0), using online encoder for rollout')
 
     # Decide whether the encoder will be trained at all in this run
     # - e2e_loss: PPO gradients flow through encoder
@@ -212,6 +272,7 @@ def train(args, encoder_model=None):
         norm_advantages=args.ppo_norm_advantages,
         max_grad_norm=args.ppo_max_grad_norm,
         e2e_loss=args.e2e_loss,
+        target_ae=target_ae if use_ema else None,
     )
 
     replay_buffer = ReplayBuffer(args.replay_size) if args.ae_er_train else None
@@ -224,19 +285,41 @@ def train(args, encoder_model=None):
     recent_rewards = []
     reward_window = 10
 
+    # Snapback: save encoder state at each new best, restore+freeze on decline
+    use_snapback = getattr(args, 'encoder_snapback', False)
+    snapback_threshold = getattr(args, 'snapback_threshold', 0.5)
+    snapback_patience = getattr(args, 'snapback_patience', 100)
+    snapback_min_reward = getattr(args, 'snapback_min_reward', 0.0)
+    snapback_best_encoder_sd = None   # state_dict of encoder at best reward
+    snapback_decline_count = 0        # consecutive episodes below threshold
+    encoder_frozen_by_snapback = False
+    if use_snapback:
+        print(f'Encoder snapback enabled: threshold={snapback_threshold}, patience={snapback_patience}, min_reward={snapback_min_reward}')
+
     # Global episode stats (run_stats is reset at log_freq)
     all_episode_rewards = []
     all_episode_lengths = []
 
-    # Rollout init
-    reset_result = env.reset()
-    if isinstance(reset_result, tuple):
-        curr_obs, _ = reset_result
-    else:
-        curr_obs = reset_result
-    curr_obs = torch.from_numpy(curr_obs).float()
+    num_envs = getattr(args, 'num_envs', 1)
+    use_vec_env = (num_envs > 1)
 
-    ep_rewards = []
+    if use_vec_env:
+        vec_env = make_vec_env(args.env_name, num_envs, max_steps=args.env_max_steps)
+        curr_obs_np, _ = vec_env.reset()
+        curr_obs = torch.from_numpy(curr_obs_np).float()
+        ep_rewards = [[] for _ in range(num_envs)]
+        steps_per_update = args.batch_size // num_envs
+        print(f'Vectorized rollout: {num_envs} envs × {steps_per_update} steps = {args.batch_size} transitions/update')
+    else:
+        # Rollout init (single env)
+        reset_result = env.reset()
+        if isinstance(reset_result, tuple):
+            curr_obs, _ = reset_result
+        else:
+            curr_obs = reset_result
+        curr_obs = torch.from_numpy(curr_obs).float()
+        ep_rewards = []
+
     n_batches = int(np.ceil(args.mf_steps / args.batch_size))
     step = 0
 
@@ -248,146 +331,254 @@ def train(args, encoder_model=None):
 
         batch_data = {k: [] for k in ['obs', 'states', 'next_obs', 'rewards', 'acts', 'gammas']}
 
-        for _ in range(args.batch_size):
-            with torch.no_grad():
-                env_change = (
-                    isinstance(args.env_change_freq, int)
-                    and args.env_change_freq > 0
-                    and (step + 1) % args.env_change_freq == 0
-                )
+        if use_vec_env:
+            # ── Vectorized rollout: N envs stepped simultaneously ──
+            # Store time-major [T, N, ...] then permute to env-major [N, T, ...]
+            # before PPO so GAE is computed over each env's trajectory independently.
+            # Cross-env contamination is prevented by bootstrapping each env's last
+            # step (setting gamma=0 at env boundaries).
+            model_device = next(ae_model.parameters()).device
+            rollout_enc = target_ae if use_ema else ae_model
 
-                model_device = next(ae_model.parameters()).device
-                state = ae_model.encode(
-                    curr_obs.unsqueeze(0).to(model_device),
-                    return_one_hot=not vqvae_e2e,
-                    return_quantized=vqvae_e2e,
-                )
+            obs_list, states_list, acts_list = [], [], []
+            next_obs_list, rewards_list, gammas_list = [], [], []
 
-                act_logits = policy(state)
-                act_dist = Categorical(logits=act_logits)
+            for _ in range(steps_per_update):
+                with torch.no_grad():
+                    states = rollout_enc.encode(
+                        curr_obs.to(model_device),
+                        return_one_hot=not vqvae_e2e,
+                        return_quantized=vqvae_e2e,
+                    )  # (N, latent_dim)
+                    acts = Categorical(logits=policy(states)).sample().cpu()  # (N,)
 
-                # keep action tensor shape [1] for PPO gather()
-                act_tensor = act_dist.sample().cpu()     # shape: [1]
-                act_int = int(act_tensor.item())         # python int for env.step()
+                next_obs_np, rewards, terminated, truncated, _ = vec_env.step(acts.numpy())
+                dones = terminated | truncated
+                next_obs = torch.from_numpy(next_obs_np).float()
 
-            batch_data['obs'].append(curr_obs)
-            batch_data['states'].append(state.squeeze(0))
-            batch_data['acts'].append(act_tensor)
+                # Store full N-tensors per timestep (time-major)
+                obs_list.append(curr_obs.clone())
+                states_list.append(states.cpu())
+                acts_list.append(acts.unsqueeze(1))   # [N, 1]
+                next_obs_list.append(next_obs.clone())
+                rewards_list.append(torch.tensor(rewards, dtype=torch.float32))
+                gammas_list.append(torch.tensor(
+                    args.gamma * (1.0 - dones.astype(np.float32)), dtype=torch.float32))
 
-            # Step env
-            step_result = env.step(act_int)
-            if len(step_result) == 5:
-                next_obs, reward, terminated, truncated, info = step_result
-                done = terminated or truncated
-            else:
-                next_obs, reward, done, info = step_result
+                # Episode tracking
+                for i in range(num_envs):
+                    ep_rewards[i].append(float(rewards[i]))
+                    if dones[i]:
+                        ep_r = float(np.sum(ep_rewards[i]))
+                        ep_l = int(len(ep_rewards[i]))
+                        ep_rewards[i] = []
 
-            done = done or env_change
+                        all_episode_rewards.append(ep_r)
+                        all_episode_lengths.append(ep_l)
+                        recent_rewards.append(ep_r)
+                        if len(recent_rewards) > reward_window:
+                            recent_rewards.pop(0)
 
-            next_obs = torch.from_numpy(next_obs).float()
-            ep_rewards.append(reward)
+                        current_avg_reward = float(np.mean(recent_rewards))
+                        if (len(recent_rewards) >= reward_window) and (current_avg_reward > best_avg_reward) and (current_avg_reward > 0.0):
+                            best_avg_reward = current_avg_reward
+                            print(f"New best average reward: {best_avg_reward:.4f} (over {len(recent_rewards)} episodes)")
+                            if use_snapback and train_encoder:
+                                _raw = getattr(ae_model, '_orig_mod', ae_model)
+                                snapback_best_encoder_sd = {k: v.clone() for k, v in _raw.state_dict().items()}
+                            if args.save:
+                                save_best_model(ae_model, policy, critic, optimizer, step, args, best_avg_reward, suffix="best", target_ae=target_ae)
 
-            batch_data['next_obs'].append(next_obs)
-            batch_data['rewards'].append(torch.tensor(reward).float())
-            batch_data['gammas'].append(torch.tensor(args.gamma * (1 - done)).float())
+                        # Snapback check
+                        if use_snapback and train_encoder and not encoder_frozen_by_snapback and len(recent_rewards) >= reward_window:
+                            snapback_decline_count, train_encoder, encoder_scheduler, encoder_frozen_by_snapback = \
+                                _snapback_check(current_avg_reward, best_avg_reward, snapback_threshold,
+                                                snapback_decline_count, snapback_patience,
+                                                ae_model, snapback_best_encoder_sd, train_encoder, encoder_scheduler, step,
+                                                min_reward=snapback_min_reward)
 
-            # Crafter achievement logging
-            if 'achievements' in info:
-                for k, v in info['achievements'].items():
-                    run_stats[f'achievement/{k}'].append(v)
-                    ep_info[f'achievement/{k}'].append(v)
+                        run_stats['ep_length'].append(ep_l)
+                        run_stats['ep_reward'].append(ep_r)
 
-            # Replay buffer
-            if replay_buffer is not None:
-                replay_buffer.add_step(
-                    curr_obs, act_tensor, next_obs,
-                    batch_data['rewards'][-1], batch_data['gammas'][-1]
-                )
+                    update_stats(run_stats, {'reward': float(rewards[i])})
 
-            if done:
-                if replay_buffer is not None:
-                    replay_buffer.add_step(
-                        next_obs, act_tensor, next_obs,
-                        batch_data['rewards'][-1], batch_data['gammas'][-1]
-                    )
+                if step > 0 and step % args.log_freq == 0:
+                    log_stats(run_stats, step, args)
+                    run_stats = defaultdict(list)
 
-                if env_change or args.env_change_freq == 'episode':
-                    if args.env_change_type == 'random':
-                        env.seeds = [np.random.randint(0, 1000000)]
-                    elif args.env_change_type == 'next':
-                        env.seeds = [env.seeds[0] + 1]
-                    else:
-                        raise ValueError(f'Invalid env change type: {args.env_change_type}')
-
-                reset_result = env.reset()
-                if isinstance(reset_result, tuple):
-                    curr_obs, _ = reset_result
-                else:
-                    curr_obs = reset_result
-                curr_obs = torch.from_numpy(curr_obs).float()
-
-                episode_reward = float(np.sum(ep_rewards))
-                episode_length = int(len(ep_rewards))
-
-                all_episode_rewards.append(episode_reward)
-                all_episode_lengths.append(episode_length)
-
-                recent_rewards.append(episode_reward)
-                if len(recent_rewards) > reward_window:
-                    recent_rewards.pop(0)
-
-                current_avg_reward = float(np.mean(recent_rewards))
-
-                # Save best only when (a) window is full AND (b) avg_reward > 0
-                # This avoids spamming saves at 0.0 and stabilizes metric.
-                if (len(recent_rewards) >= reward_window) and (current_avg_reward > best_avg_reward) and (current_avg_reward > 0.0):
-                    best_avg_reward = current_avg_reward
-                    print(f"New best average reward: {best_avg_reward:.4f} (over {len(recent_rewards)} episodes)")
-                    if args.save:
-                        save_best_model(
-                            ae_model, policy, critic, optimizer,
-                            step, args, best_avg_reward, suffix="best"
-                        )
-
-                run_stats['ep_length'].append(episode_length)
-                run_stats['ep_reward'].append(episode_reward)
-
-                if 'crafter' in args.env_name.lower():
-                    achievement_keys = [k for k in ep_info.keys() if 'achievement' in k]
-                    percents = np.array([np.mean(ep_info[k]) * 100 for k in achievement_keys])
-                    score = np.exp(np.nanmean(np.log(1 + percents), -1)) - 1
-                    run_stats['achievement/score'].append(score)
-
-                #print('\n--- Episode Stats ---')
-                #print(f'Reward: {episode_reward:.4f}')
-                #print(f'Length: {episode_length}')
-                #print(f'Avg Reward (last {len(recent_rewards)}): {current_avg_reward:.4f}')
-                #print(f'Best Avg Reward: {best_avg_reward:.4f}')
-
-                ep_rewards = []
-                ep_info = defaultdict(list)
-            else:
+                step += num_envs
                 curr_obs = next_obs
 
-            update_stats(run_stats, {'reward': reward})
+            # Bootstrap last step for each non-terminal env.
+            # This sets gamma=0 at every env boundary so GAE cannot bleed
+            # across envs when we flatten to env-major order below.
+            last_gammas = gammas_list[-1]  # [N]
+            non_term = last_gammas > 0
+            if non_term.any():
+                with torch.no_grad():
+                    _boot_enc = target_ae if use_ema else ae_model
+                    last_next = next_obs_list[-1][non_term].to(model_device)
+                    boot_states = _boot_enc.encode(
+                        last_next,
+                        return_one_hot=not vqvae_e2e,
+                        return_quantized=vqvae_e2e,
+                    )
+                    boot_vals = critic(boot_states).squeeze(-1).cpu()  # [n_non_term]
+                rewards_list[-1][non_term] += last_gammas[non_term] * boot_vals
+                gammas_list[-1][non_term] = 0.0
 
-            # Logging
-            if step > 0 and step % args.log_freq == 0:
-                if 'crafter' in args.env_name.lower():
-                    achievement_keys = [k for k in run_stats.keys() if 'achievement' in k]
-                    percents = np.array([np.mean(run_stats[k]) * 100 for k in achievement_keys])
-                    score = np.exp(np.nanmean(np.log(1 + percents), -1)) - 1
-                    run_stats['achievement/score'].append(score)
+            # Stack to [T, N, ...] then permute to [N, T, ...] and flatten [N*T, ...]
+            # Env-major order: env0's full trajectory, then env1's, etc.
+            # GAE in ppo.train() stays within each env's segment because
+            # gammas=0 at every env boundary (from bootstrap above).
+            T, N = steps_per_update, num_envs
+            obs_T       = torch.stack(obs_list)        # [T, N, *obs]
+            states_T    = torch.stack(states_list)     # [T, N, latent]
+            acts_T      = torch.stack(acts_list)       # [T, N, 1]
+            next_obs_T  = torch.stack(next_obs_list)   # [T, N, *obs]
+            rewards_T   = torch.stack(rewards_list)    # [T, N]
+            gammas_T    = torch.stack(gammas_list)     # [T, N]
 
-                log_stats(run_stats, step, args)
-                run_stats = defaultdict(list)
+            def _to_env_major(x, trailing_dims):
+                # [T, N, *trailing] → [N, T, *trailing] → [N*T, *trailing]
+                perm = (1, 0) + tuple(range(2, x.dim()))
+                return x.permute(*perm).reshape(N * T, *trailing_dims)
 
-                # Recon images
-                if step % (args.log_freq * args.checkpoint_freq) == 0:
-                    recons = sample_recon_imgs(ae_model, batch_data['obs'], env_name=args.env_name)
-                    log_images({'img_recon': recons}, args, step=step)
+            obs_dim = tuple(obs_T.shape[2:])
+            batch_data = {
+                'obs':      _to_env_major(obs_T,      obs_dim),
+                'states':   _to_env_major(states_T,   (states_T.shape[-1],)),
+                'acts':     _to_env_major(acts_T,     (1,)),
+                'next_obs': _to_env_major(next_obs_T, obs_dim),
+                'rewards':  rewards_T.permute(1, 0).reshape(N * T),
+                'gammas':   gammas_T.permute(1, 0).reshape(N * T),
+            }
 
-            step += 1
+        else:
+            # ── Single-env rollout (original path) ──
+            for _ in range(args.batch_size):
+                with torch.no_grad():
+                    env_change = (
+                        isinstance(args.env_change_freq, int)
+                        and args.env_change_freq > 0
+                        and (step + 1) % args.env_change_freq == 0
+                    )
+
+                    model_device = next(ae_model.parameters()).device
+                    rollout_enc = target_ae if use_ema else ae_model
+                    state = rollout_enc.encode(
+                        curr_obs.unsqueeze(0).to(model_device),
+                        return_one_hot=not vqvae_e2e,
+                        return_quantized=vqvae_e2e,
+                    )
+
+                    act_logits = policy(state)
+                    act_dist = Categorical(logits=act_logits)
+                    act_tensor = act_dist.sample().cpu()
+                    act_int = int(act_tensor.item())
+
+                batch_data['obs'].append(curr_obs)
+                batch_data['states'].append(state.squeeze(0))
+                batch_data['acts'].append(act_tensor)
+
+                step_result = env.step(act_int)
+                if len(step_result) == 5:
+                    next_obs, reward, terminated, truncated, info = step_result
+                    done = terminated or truncated
+                else:
+                    next_obs, reward, done, info = step_result
+
+                done = done or env_change
+                next_obs = torch.from_numpy(next_obs).float()
+                ep_rewards.append(reward)
+
+                batch_data['next_obs'].append(next_obs)
+                batch_data['rewards'].append(torch.tensor(reward).float())
+                batch_data['gammas'].append(torch.tensor(args.gamma * (1 - done)).float())
+
+                if 'achievements' in info:
+                    for k, v in info['achievements'].items():
+                        run_stats[f'achievement/{k}'].append(v)
+                        ep_info[f'achievement/{k}'].append(v)
+
+                if replay_buffer is not None:
+                    replay_buffer.add_step(curr_obs, act_tensor, next_obs, batch_data['rewards'][-1], batch_data['gammas'][-1])
+
+                if done:
+                    if replay_buffer is not None:
+                        replay_buffer.add_step(next_obs, act_tensor, next_obs, batch_data['rewards'][-1], batch_data['gammas'][-1])
+
+                    if env_change or args.env_change_freq == 'episode':
+                        if args.env_change_type == 'random':
+                            env.seeds = [np.random.randint(0, 1000000)]
+                        elif args.env_change_type == 'next':
+                            env.seeds = [env.seeds[0] + 1]
+                        else:
+                            raise ValueError(f'Invalid env change type: {args.env_change_type}')
+
+                    reset_result = env.reset()
+                    if isinstance(reset_result, tuple):
+                        curr_obs, _ = reset_result
+                    else:
+                        curr_obs = reset_result
+                    curr_obs = torch.from_numpy(curr_obs).float()
+
+                    episode_reward = float(np.sum(ep_rewards))
+                    episode_length = int(len(ep_rewards))
+                    all_episode_rewards.append(episode_reward)
+                    all_episode_lengths.append(episode_length)
+                    recent_rewards.append(episode_reward)
+                    if len(recent_rewards) > reward_window:
+                        recent_rewards.pop(0)
+
+                    current_avg_reward = float(np.mean(recent_rewards))
+                    if (len(recent_rewards) >= reward_window) and (current_avg_reward > best_avg_reward) and (current_avg_reward > 0.0):
+                        best_avg_reward = current_avg_reward
+                        print(f"New best average reward: {best_avg_reward:.4f} (over {len(recent_rewards)} episodes)")
+                        if use_snapback and train_encoder:
+                            _raw = getattr(ae_model, '_orig_mod', ae_model)
+                            snapback_best_encoder_sd = {k: v.clone() for k, v in _raw.state_dict().items()}
+                        if args.save:
+                            save_best_model(ae_model, policy, critic, optimizer, step, args, best_avg_reward, suffix="best", target_ae=target_ae)
+
+                    # Snapback check
+                    if use_snapback and train_encoder and not encoder_frozen_by_snapback and len(recent_rewards) >= reward_window:
+                        snapback_decline_count, train_encoder, encoder_scheduler, encoder_frozen_by_snapback = \
+                            _snapback_check(current_avg_reward, best_avg_reward, snapback_threshold,
+                                            snapback_decline_count, snapback_patience,
+                                            ae_model, snapback_best_encoder_sd, train_encoder, encoder_scheduler, step)
+
+                    run_stats['ep_length'].append(episode_length)
+                    run_stats['ep_reward'].append(episode_reward)
+
+                    if 'crafter' in args.env_name.lower():
+                        achievement_keys = [k for k in ep_info.keys() if 'achievement' in k]
+                        percents = np.array([np.mean(ep_info[k]) * 100 for k in achievement_keys])
+                        score = np.exp(np.nanmean(np.log(1 + percents), -1)) - 1
+                        run_stats['achievement/score'].append(score)
+
+                    ep_rewards = []
+                    ep_info = defaultdict(list)
+                else:
+                    curr_obs = next_obs
+
+                update_stats(run_stats, {'reward': reward})
+
+                if step > 0 and step % args.log_freq == 0:
+                    if 'crafter' in args.env_name.lower():
+                        achievement_keys = [k for k in run_stats.keys() if 'achievement' in k]
+                        percents = np.array([np.mean(run_stats[k]) * 100 for k in achievement_keys])
+                        score = np.exp(np.nanmean(np.log(1 + percents), -1)) - 1
+                        run_stats['achievement/score'].append(score)
+
+                    log_stats(run_stats, step, args)
+                    run_stats = defaultdict(list)
+
+                    if step % (args.log_freq * args.checkpoint_freq) == 0:
+                        recons = sample_recon_imgs(ae_model, batch_data['obs'], env_name=args.env_name)
+                        log_images({'img_recon': recons}, args, step=step)
+
+                step += 1
 
         # === Updates ===
         policy.train()
@@ -401,13 +592,21 @@ def train(args, encoder_model=None):
         ae_model.to(args.device)
         policy.to(args.device)
 
-        batch_data = {k: torch.stack(v).to(args.device) for k, v in batch_data.items()}
+        # Vec env path: batch_data values are already tensors; single-env: lists of tensors
+        if use_vec_env:
+            batch_data = {k: v.to(args.device) for k, v in batch_data.items()}
+        else:
+            batch_data = {k: torch.stack(v).to(args.device) for k, v in batch_data.items()}
 
         # PPO updates
         if step >= args.rl_start_step:
             loss_dict = ppo.train(batch_data)
             for k, v in loss_dict.items():
                 run_stats[k].append(v.item())
+
+        # EMA update target encoder after PPO batch
+        if use_ema and train_encoder:
+            _ema_update(ae_model, target_ae, ema_tau)
 
         # Step encoder LR scheduler (once per batch)
         if encoder_scheduler is not None:
@@ -455,10 +654,10 @@ def train(args, encoder_model=None):
             print(f"   Overall average reward: {overall_avg_reward:.4f}")
             print(f"   Best rolling average: {best_report:.4f}")
 
-            save_best_model(ae_model, policy, critic, optimizer, step, args, final_avg_reward, suffix="final")
+            save_best_model(ae_model, policy, critic, optimizer, step, args, final_avg_reward, suffix="final", target_ae=target_ae)
         else:
             print("No episodes completed, saving final model anyway")
-            save_best_model(ae_model, policy, critic, optimizer, step, args, 0.0, suffix="final")
+            save_best_model(ae_model, policy, critic, optimizer, step, args, 0.0, suffix="final", target_ae=target_ae)
 
     return policy, critic
 
