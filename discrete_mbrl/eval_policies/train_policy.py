@@ -31,6 +31,19 @@ def parse_args():
   parser.add_argument('--eval_freq', type=int, default=30_000)
   parser.add_argument('--eval_episodes', type=int, default=20)
   parser.add_argument('--policy_model', type=str, default='CnnPolicy')
+  parser.add_argument('--n_steps', type=int, default=128,
+                      help='PPO rollout steps per env per update. Default 128 gives '
+                           '~292 updates for 300k steps with 8 envs (vs 18 with SB3 '
+                           'default of 2048).')
+  parser.add_argument('--batch_size', type=int, default=64)
+  parser.add_argument('--n_epochs', type=int, default=10)
+  parser.add_argument('--learning_rate', type=float, default=3e-4)
+  parser.add_argument('--gamma', type=float, default=0.99)
+  parser.add_argument('--gae_lambda', type=float, default=0.95)
+  parser.add_argument('--clip_range', type=float, default=0.2)
+  parser.add_argument('--ent_coef', type=float, default=0.0)
+  parser.add_argument('--vf_coef', type=float, default=0.5)
+  parser.add_argument('--run_name', type=str, default=None)
   return parser.parse_args()
 
 
@@ -60,17 +73,34 @@ if __name__ == '__main__':
     best_model_save_path='./logs/', log_path='./logs/',
     deterministic=True)
 
+  n_updates = args.train_steps // (args.n_steps * args.n_envs)
+  print(f'PPO setup: n_steps={args.n_steps}, n_envs={args.n_envs}, '
+        f'total_steps={args.train_steps:,} -> ~{n_updates} updates')
+
   # Create and train policy
-  model = PPO(args.policy_model, env, verbose=1, tensorboard_log='./logs/',)
+  model = PPO(
+    args.policy_model, env, verbose=1, tensorboard_log='./logs/',
+    n_steps=args.n_steps,
+    batch_size=args.batch_size,
+    n_epochs=args.n_epochs,
+    learning_rate=args.learning_rate,
+    gamma=args.gamma,
+    gae_lambda=args.gae_lambda,
+    clip_range=args.clip_range,
+    ent_coef=args.ent_coef,
+    vf_coef=args.vf_coef,
+  )
   model.learn(total_timesteps=args.train_steps, callback=eval_callback)
 
   # Save the final trained policy
+  run_tag = args.run_name or f'{args.env_name}_{args.goal_type}'
   save_path = MODEL_SAVE_FORMAT.format(args.env_name, args.goal_type)
   save_dir = os.path.dirname(save_path)
   if not os.path.exists(save_dir):
     os.makedirs(save_dir)
-  model.policy.save(save_path)
-  print(f'Saved final policy to {save_path}')
+  final_path = os.path.join(save_dir, f'{run_tag}_final')
+  model.save(final_path)
+  print(f'Saved final policy to {final_path}.zip')
 
   # Print eval stats from the best eval checkpoint
   eval_stats = np.load('./logs/evaluations.npz')
