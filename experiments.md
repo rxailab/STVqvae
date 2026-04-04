@@ -698,7 +698,8 @@ python3 -u train.py \
 | e2ephased | 20299313 | Done | 0.594 | 0.000 | + hard freeze at 2.5M |
 | e2ecosine2 | 20306194 | Done | 0.798 | 0.188 | bug fix: cosine only on encoder |
 | e2eema | — (local) | Done | 0.663 | 0.000 | EMA target encoder — two GAE bugs masked real performance |
-| **e2esnapback** | — (local) | **Done** ✅ | **0.9988** 🏆 | **0.3995** | Fixed 2 GAE bugs + snapback; new best; snapback triggered at 83% leaving only 840k steps to recover |
+| **e2esnapback** | — (local) | **Done** | **0.9988** | **0.3995** | Fixed 2 GAE bugs + snapback; snapback triggered at 83% leaving only 840k steps to recover |
+| **e2esnapback_10m** | — (local) | **Done** ✅ | **0.9988** 🏆 | **0.9984** 🏆 | 10M steps; snapback never triggered; encoder stable throughout; **new best overall** |
 | **vqvae_pretrain_ppo** | — (local, RTX 4090) | **Done** | **0.1927** | **0.0000** | Pretrained VQVAE (`ea136dc...`) loaded + frozen from step 0; reconstruction-trained encoder failed — random-policy data lacks goal coverage; representation not task-relevant |
 | **vqvae_preinit_snapback_ppo** | — (local, RTX 4090) | **Done** ✅ | **0.9988** | **0.8988** | Same pretrained VQVAE init + controlled e2e finetune (`encoder_lr=1e-5`, cosine, snapback) |
 | **vae_wm_rl_v1** | — (local, RTX 4090) | **Done** | **0.0922** (train) | **0.000** (real-eval) | World model pipeline: VAE + continuous transition + PPO in latent world (`rl_train_steps=300k`); poor real-env transfer |
@@ -1199,6 +1200,7 @@ After both fixes: peak jumped from 0.473 → **0.9988**, exceeding e2estable's 0
 | EMA target encoder | ❌ Target follows online drift with delay — doesn't stop it |
 | **Snapback** | ✅ Prevented total collapse (0.000 → 0.3995 final) but Phase 3 too short (840k steps) |
 | **GAE bugs fixed** | ✅ Unlocked full performance — peak 0.9988, new best |
+| **10M training budget** | ✅ Encoder never collapsed; final 0.9984, overall 0.9732 — **new best overall** |
 
 ### Open question
 With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k steps and reached 0.3995. This suggests the stable-encoder phase needs more budget. `vqvae_pretrain_ppo` tests the extreme case: all 5M steps are pure policy training on a reconstruction-trained frozen VQVAE — but this failed (peak 0.1927) because reconstruction-trained representations are not task-relevant.
@@ -1207,7 +1209,7 @@ With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k st
 
 ### 25. e2esnapback_10m
 
-**Status:** Running (PID 1684785)
+**Status:** Done
 **Script:** `discrete_mbrl/model_free/train.py`
 **Hardware:** RTX 4090 (local, direct run — no SLURM)
 **Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/e2esnapback_10m_best_model.pt`
@@ -1241,10 +1243,28 @@ PYTHONPATH=../.. python train.py \
 
 | Metric | Value |
 |---|---|
-| Best rolling avg reward (10-ep window) | — |
-| Final 10-ep avg | — |
-| Overall avg reward | — |
-| Snapback triggered at step | — |
+| Best rolling avg reward (10-ep window) | **0.9988** |
+| Final 10-ep avg | **0.9984** |
+| Overall avg reward | **0.9732** |
+| Snapback triggered at step | **Never** |
+
+**Analysis:**
+
+Hypothesis confirmed and exceeded. Not only did the final reward jump from 0.3995 → **0.9984**, snapback never triggered at all — the encoder maintained a stable representation for the entire 10M steps without collapsing. Two possible explanations:
+
+1. **Longer training stabilises the encoder:** With 10M steps, the policy becomes highly competent before the encoder has a chance to drift far. A well-trained policy generates more consistent, on-policy gradient signals that keep the encoder in a stable region.
+2. **Stochastic timing:** The collapse in the 5M run may have been a near-miss — a small perturbation tipped it over. With the same hyperparameters, a second run might simply not hit that perturbation.
+
+Regardless of mechanism, the result is the new best: **final 0.9984**, **overall 0.9732** — consistently near-optimal throughout training, not just at peak.
+
+**Comparison vs e2esnapback (5M):**
+
+| Metric | e2esnapback (5M) | e2esnapback_10m (10M) |
+|---|---|---|
+| Peak reward | 0.9988 | **0.9988** |
+| Final 10-ep avg | 0.3995 | **0.9984** |
+| Overall avg | — | **0.9732** |
+| Snapback triggered | Yes (step 4.16M) | **No** |
 
 ---
 
