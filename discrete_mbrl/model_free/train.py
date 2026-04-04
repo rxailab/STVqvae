@@ -445,9 +445,10 @@ def train(args, encoder_model=None):
                 return x.permute(*perm).reshape(N * T, *trailing_dims)
 
             obs_dim = tuple(obs_T.shape[2:])
+            state_dim = tuple(states_T.shape[2:])
             batch_data = {
                 'obs':      _to_env_major(obs_T,      obs_dim),
-                'states':   _to_env_major(states_T,   (states_T.shape[-1],)),
+                'states':   _to_env_major(states_T,   state_dim),
                 'acts':     _to_env_major(acts_T,     (1,)),
                 'next_obs': _to_env_major(next_obs_T, obs_dim),
                 'rewards':  rewards_T.permute(1, 0).reshape(N * T),

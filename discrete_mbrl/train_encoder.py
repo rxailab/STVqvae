@@ -34,7 +34,8 @@ def train_encoder(args):
         train_loader, test_loader, valid_loader = prepare_dataloaders(
             args.env_name, n=args.max_transitions, batch_size=args.batch_size,
             preprocess=args.preprocess, randomize=True, n_preload=args.n_preload,
-            preload_all=args.preload_data, extra_buffer_keys=args.extra_buffer_keys)
+            # Force full preload for encoder training to avoid per-sample HDF5 IO.
+            preload_all=True, extra_buffer_keys=args.extra_buffer_keys)
         #print(f'⏱️  Data loaders created in {time.time() - data_start:.2f}s')
 
     valid_len = len(valid_loader.dataset) if valid_loader is not None else 0
@@ -44,9 +45,16 @@ def train_encoder(args):
     #print('🕐 Constructing model...')
     model_start = time.time()
 
-    #print('🕐 Getting first sample...')
+    # Avoid loading a full training batch just to infer input shape.
+    # This keeps startup fast when batch_size is large.
     pre_sample_time = time.time()
-    sample_obs = next(iter(train_loader))[0]
+    sample_item = train_loader.dataset[0]
+    sample_obs = sample_item[0] if isinstance(sample_item, (tuple, list)) else sample_item
+    if isinstance(sample_obs, torch.Tensor):
+        if sample_obs.ndim == 3:
+            sample_obs = sample_obs.unsqueeze(0)
+        elif sample_obs.ndim >= 4:
+            sample_obs = sample_obs[:1]
     sample_time = time.time() - pre_sample_time
     #print(f'⏱️  First sample obtained in {sample_time:.2f}s')
     #print(f'📦 Sample shape: {sample_obs.shape}')
