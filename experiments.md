@@ -1201,4 +1201,98 @@ After both fixes: peak jumped from 0.473 → **0.9988**, exceeding e2estable's 0
 | **GAE bugs fixed** | ✅ Unlocked full performance — peak 0.9988, new best |
 
 ### Open question
-With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k steps and reached 0.3995. This suggests the stable-encoder phase needs more budget. `vqvae_pretrain_ppo` tests the extreme case: all 5M steps are pure policy training on a reconstruction-trained frozen VQVAE.
+With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k steps and reached 0.3995. This suggests the stable-encoder phase needs more budget. `vqvae_pretrain_ppo` tests the extreme case: all 5M steps are pure policy training on a reconstruction-trained frozen VQVAE — but this failed (peak 0.1927) because reconstruction-trained representations are not task-relevant.
+
+---
+
+### 25. e2esnapback_10m
+
+**Status:** Running (PID 1684785)
+**Script:** `discrete_mbrl/model_free/train.py`
+**Hardware:** RTX 4090 (local, direct run — no SLURM)
+**Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/e2esnapback_10m_best_model.pt`
+**Log:** `/tmp/e2esnapback_10m.log`
+
+**Motivation:** e2esnapback hit peak **0.9988** but snapback triggered at step 4.16M (83% through 5M), leaving only ~840k steps of stable policy training post-freeze. The recovery reached only 0.3995 final. By doubling the budget to 10M steps, snapback still triggers around 4M steps but leaves ~6M steps of stable frozen-encoder PPO — giving the policy ~7× more time to consolidate after freeze.
+
+**Only change vs e2esnapback:** `--mf_steps 10000000` (5M → 10M).
+
+**Full command:**
+```bash
+cd discrete_mbrl/model_free
+PYTHONPATH=../.. python train.py \
+  --env_name MiniGrid-LavaCrossingS9N1-v0 \
+  --ae_model_type vqvae --ae_model_version 2 \
+  --codebook_size 64 --embedding_dim 64 --filter_size 9 \
+  --mf_steps 10000000 --batch_size 4096 \
+  --num_envs 16 \
+  --e2e_loss --encoder_lr 3e-5 \
+  --encoder_snapback --snapback_threshold 0.5 --snapback_patience 100 --snapback_min_reward 0.6 \
+  --ppo_iters 10 --ppo_batch_size 64 \
+  --ppo_entropy_coef 0.01 --ppo_gae_lambda 0.95 \
+  --ppo_norm_advantages --ppo_max_grad_norm 0.5 \
+  --entropy_penalty_coef 0.05 --ortho_init \
+  --run_name e2esnapback_10m --device cuda --save
+```
+
+**Expected outcome:** Peak reward similar to e2esnapback (~0.9988), but final reward substantially higher than 0.3995 due to longer post-snapback consolidation.
+
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Best rolling avg reward (10-ep window) | — |
+| Final 10-ep avg | — |
+| Overall avg reward | — |
+| Snapback triggered at step | — |
+
+---
+
+### 26. e2e_ema_tau
+
+**Status:** Pending (will start after e2esnapback_10m completes)
+**Script:** `discrete_mbrl/model_free/train.py`
+**Hardware:** RTX 4090 (local, direct run — no SLURM)
+**Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/e2e_ema_tau_best_model.pt`
+**Log:** `/tmp/e2e_ema_tau.log`
+
+**Motivation:** In all e2e experiments, the policy observes the *online* encoder output — when the encoder drifts, the policy's input distribution shifts suddenly. With a slow EMA target encoder (`tau=0.995`), the *rollout* encoder is a momentum average of past online weights, changing smoothly rather than jerking. The online encoder still receives full PPO gradients (learns task-relevant features), but the policy always sees a stable, slowly-evolving representation. This decouples learning speed from representation stability.
+
+**Key change vs e2esnapback:** Replace snapback with `--encoder_ema_tau 0.995`. The EMA target is used for rollout collection and bootstrapping; the online encoder updates with e2e gradients.
+
+**Full command:**
+```bash
+cd discrete_mbrl/model_free
+PYTHONPATH=../.. python train.py \
+  --env_name MiniGrid-LavaCrossingS9N1-v0 \
+  --ae_model_type vqvae --ae_model_version 2 \
+  --codebook_size 64 --embedding_dim 64 --filter_size 9 \
+  --mf_steps 5000000 --batch_size 4096 \
+  --num_envs 16 \
+  --e2e_loss --encoder_lr 3e-5 \
+  --encoder_ema_tau 0.995 \
+  --ppo_iters 10 --ppo_batch_size 64 \
+  --ppo_entropy_coef 0.01 --ppo_gae_lambda 0.95 \
+  --ppo_norm_advantages --ppo_max_grad_norm 0.5 \
+  --entropy_penalty_coef 0.05 --ortho_init \
+  --run_name e2e_ema_tau --device cuda --save
+```
+
+**Key differences vs previous experiments:**
+
+| Aspect | e2esnapback | e2e_ema_tau |
+|---|---|---|
+| Rollout encoder | Online (drifts) | **EMA target (smooth)** |
+| Encoder gradients | e2e PPO | **e2e PPO (same)** |
+| Anti-collapse mechanism | Snapback (reactive) | **EMA smoothing (proactive)** |
+| Post-collapse recovery | ~840k steps (5M run) | **No collapse expected** |
+
+**Hypothesis:** EMA smoothing prevents the sudden input-distribution jumps that destabilise the policy, allowing the encoder to keep learning throughout all 5M steps without a collapse event. Expected final reward higher than e2esnapback's 0.3995, potentially matching or exceeding the 0.9988 peak.
+
+**Results:**
+
+| Metric | Value |
+|---|---|
+| Best rolling avg reward (10-ep window) | — |
+| Final 10-ep avg | — |
+| Overall avg reward | — |
