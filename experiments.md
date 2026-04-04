@@ -700,6 +700,7 @@ python3 -u train.py \
 | e2eema | — (local) | Done | 0.663 | 0.000 | EMA target encoder — two GAE bugs masked real performance |
 | **e2esnapback** | — (local) | **Done** | **0.9988** | **0.3995** | Fixed 2 GAE bugs + snapback; snapback triggered at 83% leaving only 840k steps to recover |
 | **e2esnapback_10m** | — (local) | **Done** ✅ | **0.9988** 🏆 | **0.9984** 🏆 | 10M steps; snapback never triggered; encoder stable throughout; **new best overall** |
+| **e2e_ema_tau** | — (local) | **Done** | **0.3987** | **0.0000** | EMA target encoder (τ=0.995); smoothed rollout repr but online encoder still drifted; collapsed to 0 final |
 | **vqvae_pretrain_ppo** | — (local, RTX 4090) | **Done** | **0.1927** | **0.0000** | Pretrained VQVAE (`ea136dc...`) loaded + frozen from step 0; reconstruction-trained encoder failed — random-policy data lacks goal coverage; representation not task-relevant |
 | **vqvae_preinit_snapback_ppo** | — (local, RTX 4090) | **Done** ✅ | **0.9988** | **0.8988** | Same pretrained VQVAE init + controlled e2e finetune (`encoder_lr=1e-5`, cosine, snapback) |
 | **vae_wm_rl_v1** | — (local, RTX 4090) | **Done** | **0.0922** (train) | **0.000** (real-eval) | World model pipeline: VAE + continuous transition + PPO in latent world (`rl_train_steps=300k`); poor real-env transfer |
@@ -1201,6 +1202,7 @@ After both fixes: peak jumped from 0.473 → **0.9988**, exceeding e2estable's 0
 | **Snapback** | ✅ Prevented total collapse (0.000 → 0.3995 final) but Phase 3 too short (840k steps) |
 | **GAE bugs fixed** | ✅ Unlocked full performance — peak 0.9988, new best |
 | **10M training budget** | ✅ Encoder never collapsed; final 0.9984, overall 0.9732 — **new best overall** |
+| **EMA target encoder (τ=0.995)** | ❌ Smooths short-term drift but online encoder still drifts long-term; peak 0.3987, final 0.0000 |
 
 ### Open question
 With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k steps and reached 0.3995. This suggests the stable-encoder phase needs more budget. `vqvae_pretrain_ppo` tests the extreme case: all 5M steps are pure policy training on a reconstruction-trained frozen VQVAE — but this failed (peak 0.1927) because reconstruction-trained representations are not task-relevant.
@@ -1270,7 +1272,7 @@ Regardless of mechanism, the result is the new best: **final 0.9984**, **overall
 
 ### 26. e2e_ema_tau
 
-**Status:** Pending (will start after e2esnapback_10m completes)
+**Status:** Done
 **Script:** `discrete_mbrl/model_free/train.py`
 **Hardware:** RTX 4090 (local, direct run — no SLURM)
 **Model files:** `./models/MiniGrid-LavaCrossingS9N1-v0/e2e_ema_tau_best_model.pt`
@@ -1313,6 +1315,26 @@ PYTHONPATH=../.. python train.py \
 
 | Metric | Value |
 |---|---|
-| Best rolling avg reward (10-ep window) | — |
-| Final 10-ep avg | — |
-| Overall avg reward | — |
+| Best rolling avg reward (10-ep window) | **0.3987** |
+| Final 10-ep avg | **0.0000** |
+| Overall avg reward | **0.0296** |
+| Snapback triggered | Never |
+
+**Analysis — why it failed:**
+
+Hypothesis falsified. EMA smoothing (τ=0.995) did not prevent encoder collapse — the final reward dropped to 0.0000 despite no snapback triggering. The peak of 0.3987 is similar to e2esnapback's post-collapse recovery (0.3995), suggesting the EMA target merely delayed the onset of drift rather than preventing it.
+
+Root cause: The *online* encoder receives full PPO gradients and still drifts into a bad representation over 5M steps. The EMA target (used for rollouts) is a lagged copy — it smooths *sudden* jumps but faithfully follows the online encoder's long-term drift. By the time the policy has learned to rely on the target's representation, the target has also drifted far enough to break it.
+
+**Key insight:** EMA decoupling helps over short timescales (episode-to-episode) but not over long training (millions of steps). It is a smoothing mechanism, not a stabilisation mechanism. The only interventions that actually prevent collapse are:
+1. **More budget** (e2esnapback_10m) — encoder drift never reached a critical threshold within 10M steps
+2. **Reactive freeze** (e2esnapback) — catches collapse after the fact and freezes
+
+**Comparison vs all approaches:**
+
+| Experiment | Peak | Final | Collapse? |
+|---|---|---|---|
+| e2esnapback (5M) | 0.9988 | 0.3995 | Yes — snapback at step 4.16M |
+| **e2esnapback_10m (10M)** | **0.9988** | **0.9984** | **No** |
+| e2e_ema_tau (5M, τ=0.995) | 0.3987 | 0.0000 | Yes — gradual drift |
+| vqvae_pretrain_ppo (frozen) | 0.1927 | 0.0000 | N/A — no RL signal |
