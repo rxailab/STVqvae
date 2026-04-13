@@ -6,6 +6,7 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
 import hashlib
 import json
+import torch
 from torch import nn
 
 # --- FIX: Import constants from the new file ---
@@ -27,7 +28,9 @@ MODEL_VARS = [
     'embedding_dim', 'latent_dim', 'filter_size', 'codebook_size',
     'ae_model_type', 'ae_model_version', 'trans_model_type', 'trans_model_version',
     'trans_hidden', 'trans_depth', 'stochastic', 'extra_info',
-    'repr_sparsity', 'sparsity_type', 'vq_trans_1d_conv']
+    'repr_sparsity', 'sparsity_type', 'vq_trans_1d_conv',
+    'trans_reward_overestimate_coef', 'trans_reward_zero_target_coef',
+    'trans_reward_zero_margin']
 AE_MODEL_VARS = [
     'embedding_dim', 'latent_dim', 'filter_size', 'codebook_size',
     'ae_model_type', 'ae_model_version', 'extra_info', 'repr_sparsity',
@@ -259,6 +262,678 @@ def make_ae_v4(input_dim, embedding_dim=None, filter_size=None):
     return encoder, decoder
 
 
+def make_ae_v5(input_dim, embedding_dim=None, filter_size=None):
+    """Strided convolution encoder — no AdaptiveAvgPool2d.
+
+    Uses uniform k=4, s=2, p=1 convolutions for clean 2× downsampling per layer.
+    The number of layers is determined automatically so that
+    output_spatial = input_spatial / 2^n_layers == filter_size.
+
+    For DoorKey-8x8: (3,64,64) → 3 layers → (embedding_dim, 8, 8) = 64 tokens,
+    each mapping to exactly one 8×8-pixel tile (= one grid cell).
+    """
+    import math
+    embedding_dim = embedding_dim or 64
+
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+
+    H, W = input_dim[1], input_dim[2]
+    filter_size = filter_size or 8
+
+    # Compute number of stride-2 layers needed: H / 2^n = filter_size
+    n_layers = int(round(math.log2(H / filter_size)))
+    assert n_layers >= 1, f"filter_size {filter_size} >= input size {H}, need at least 1 layer"
+    expected = H // (2 ** n_layers)
+    assert expected == filter_size, (
+        f"Input {H} / 2^{n_layers} = {expected}, but filter_size={filter_size}. "
+        f"Input must be filter_size × a power of 2.")
+
+    # Build channel progression: gradually widen then project to embedding_dim
+    if n_layers == 1:
+        channels = [input_dim[0], embedding_dim]
+    elif n_layers == 2:
+        channels = [input_dim[0], 64, embedding_dim]
+    elif n_layers == 3:
+        channels = [input_dim[0], 64, 128, embedding_dim]
+    elif n_layers == 4:
+        channels = [input_dim[0], 32, 64, 128, embedding_dim]
+    else:
+        # Fallback: linear interpolation
+        channels = [input_dim[0]] + [min(64 * (2 ** i), 256) for i in range(n_layers - 1)] + [embedding_dim]
+
+    # Encoder: n stride-2 conv layers, each halving spatial size
+    encoder_layers = []
+    for i in range(n_layers):
+        encoder_layers.append(nn.Conv2d(
+            channels[i], channels[i + 1], kernel_size=4, stride=2, padding=1))
+        encoder_layers.append(nn.ReLU())
+
+    # Decoder: mirror with ConvTranspose2d, final adaptive pool for exact dims
+    decoder_layers = []
+    for i in reversed(range(n_layers)):
+        decoder_layers.append(nn.ConvTranspose2d(
+            channels[i + 1], channels[i], kernel_size=4, stride=2, padding=1))
+        decoder_layers.append(nn.ReLU())
+    decoder_layers.append(nn.AdaptiveAvgPool2d((H, W)))
+
+    encoder = nn.Sequential(*encoder_layers)
+    decoder = nn.Sequential(*decoder_layers)
+
+    return encoder, decoder
+
+
+class PatchContextEncoderV9(nn.Module):
+    """Patch-based encoder with local context refinement (ViT-style).
+
+    Fundamentally different from v5–v8 (all strided-conv based).  Instead of
+    overlapping convolutions that mix information across spatial positions,
+    this encoder processes each non-overlapping pixel patch *independently*
+    through a small MLP, then adds cross-token context via a lightweight
+    residual conv block.
+
+    Why this matters for semantic grounding:
+      * Strided-conv encoders (v5) have receptive fields spanning multiple
+        tiles.  A goal token's embedding is contaminated by its wall
+        neighbours, making them hard to separate in VQ space.
+      * Patch embedding guarantees each token sees ONLY its own tile's raw
+        pixels.  Goal (solid green) and wall (solid grey) produce maximally
+        different MLP outputs because their pixel distributions are disjoint.
+      * Cross-token context is added AFTER independent embedding, as a
+        residual, so it can only enrich — never overwrite — the per-tile
+        identity signal.
+
+    Architecture (64 × 64 → 8 × 8, embedding_dim = 64):
+
+        Phase 1 — Independent patch embedding:
+          Input (3, 64, 64)
+            → Conv2d(3, 256, k=8, s=8)    [non-overlapping, = per-patch linear]
+            → GroupNorm(32) → GELU
+            → Conv2d(256, 64, k=1)         [project to embedding dim]
+            → GELU
+            → (64, 8, 8)   each token = one tile, processed independently
+
+        Phase 2 — Local context refinement (residual):
+          → Conv2d(64, 64, k=3, pad=1) → GroupNorm(16) → GELU
+          → Conv2d(64, 64, k=3, pad=1) → GroupNorm(16)
+          → add residual from Phase 1
+          → GELU
+          → (64, 8, 8)
+
+    Domain-agnostic: no RGB shortcuts, no coordinate grids, no SE attention.
+    Standard ViT patch embedding + conv context — works for any visual input.
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        import math
+
+        if len(input_dim) <= 1:
+            raise ValueError("PatchContextEncoderV9 requires image observations")
+
+        C_in, H, W = input_dim
+        self.filter_size = filter_size
+        patch_size = H // filter_size
+
+        assert H == W, f"Expected square input, got {H}×{W}"
+        assert H % filter_size == 0, (
+            f"Input {H} not divisible by filter_size {filter_size}")
+
+        mid_dim = min(256, embedding_dim * 4)
+
+        # Phase 1: per-patch independent embedding
+        # Conv2d with kernel_size=stride=patch_size is equivalent to
+        # unfold → Linear for each non-overlapping patch.
+        self.patch_embed = nn.Sequential(
+            nn.Conv2d(C_in, mid_dim,
+                      kernel_size=patch_size, stride=patch_size),
+            nn.GroupNorm(min(32, mid_dim), mid_dim),
+            nn.GELU(),
+            nn.Conv2d(mid_dim, embedding_dim, kernel_size=1),
+            nn.GELU(),
+        )
+
+        # Phase 2: local context refinement (residual)
+        # Two 3×3 conv layers let each token see its 8 neighbours.
+        # Applied as a residual so it can only add context, never erase
+        # the per-tile identity from Phase 1.
+        self.context = nn.Sequential(
+            nn.Conv2d(embedding_dim, embedding_dim, 3, 1, 1),
+            nn.GroupNorm(min(16, embedding_dim), embedding_dim),
+            nn.GELU(),
+            nn.Conv2d(embedding_dim, embedding_dim, 3, 1, 1),
+            nn.GroupNorm(min(16, embedding_dim), embedding_dim),
+        )
+
+    def forward(self, x):
+        h = self.patch_embed(x)                           # (B, D, fs, fs)
+        h = h + self.context(h)                           # residual context
+        return torch.nn.functional.gelu(h)
+
+
+def make_ae_v9(input_dim, embedding_dim=None, filter_size=None):
+    """Patch-based encoder v9 + local context refinement.
+
+    ViT-style non-overlapping patch embedding.  Each token independently
+    encodes its raw pixel tile, then a residual conv block adds cross-token
+    context.  See PatchContextEncoderV9 docstring.
+    """
+    import math
+    embedding_dim = embedding_dim or 64
+
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+
+    H, W = input_dim[1], input_dim[2]
+    filter_size = filter_size or 8
+
+    encoder = PatchContextEncoderV9(
+        input_dim, embedding_dim=embedding_dim, filter_size=filter_size)
+
+    # Decoder: single ConvTranspose to upsample from filter_size to H,
+    # then a refining conv.  Simpler than v5 decoder since we only need
+    # one upsampling step (patch_size = H // filter_size).
+    patch_size = H // filter_size
+    n_layers = int(round(math.log2(H / filter_size)))
+
+    # Re-use v5 style decoder for fair comparison
+    if n_layers == 1:
+        channels = [input_dim[0], embedding_dim]
+    elif n_layers == 2:
+        channels = [input_dim[0], 64, embedding_dim]
+    elif n_layers == 3:
+        channels = [input_dim[0], 64, 128, embedding_dim]
+    elif n_layers == 4:
+        channels = [input_dim[0], 32, 64, 128, embedding_dim]
+    else:
+        channels = ([input_dim[0]]
+                    + [min(64 * (2 ** i), 256) for i in range(n_layers - 1)]
+                    + [embedding_dim])
+
+    decoder_layers = []
+    for i in reversed(range(n_layers)):
+        decoder_layers.append(nn.ConvTranspose2d(
+            channels[i + 1], channels[i], kernel_size=4, stride=2, padding=1))
+        decoder_layers.append(nn.ReLU())
+    decoder_layers.append(nn.AdaptiveAvgPool2d((H, W)))
+    decoder = nn.Sequential(*decoder_layers)
+
+    return encoder, decoder
+
+
+class ColorCoordEncoderV6(nn.Module):
+    """Grid-aligned encoder with explicit pooled color and coordinate paths.
+
+    The v5 encoder fixed spatial alignment, but still relies entirely on the
+    conv trunk to preserve rare color cues. For DoorKey-8x8 this can wash out
+    the green goal tile because it is visually simple and class-rare.
+
+    This encoder keeps the clean 8x8 alignment from v5 and adds:
+      - a pooled RGB shortcut so each token sees its cell-local average color
+      - normalized x/y coordinate channels so tokens can use absolute position
+      - a 1x1 fusion block after concatenating trunk/color/coord features
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        if len(input_dim) <= 1:
+            raise ValueError('ColorCoordEncoderV6 requires image observations')
+
+        in_channels, height, width = input_dim
+        if height != width:
+            raise ValueError(f'Expected square inputs, got {(height, width)}')
+        if height % filter_size != 0:
+            raise ValueError(
+                f'Input size {height} must be divisible by filter_size {filter_size}')
+
+        self.filter_size = filter_size
+        self.pool_stride = height // filter_size
+
+        color_dim = max(8, embedding_dim // 4)
+        coord_dim = max(4, embedding_dim // 8)
+        trunk_dim = embedding_dim - color_dim - coord_dim
+        if trunk_dim < 16:
+            raise ValueError(
+                f'embedding_dim={embedding_dim} is too small for v6 feature split')
+
+        self.color_pool = nn.AvgPool2d(kernel_size=self.pool_stride, stride=self.pool_stride)
+        self.color_proj = nn.Sequential(
+            nn.Conv2d(in_channels, color_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        self.coord_proj = nn.Sequential(
+            nn.Conv2d(2, coord_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        self.trunk = nn.Sequential(
+            nn.Conv2d(in_channels + 2, 64, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, trunk_dim, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+        )
+
+        self.fuse = nn.Sequential(
+            nn.Conv2d(embedding_dim, embedding_dim, kernel_size=1),
+            nn.ReLU(),
+            ResidualBlock(embedding_dim, embedding_dim),
+        )
+
+    def _coord_grid(self, batch_size, device, dtype):
+        axis = torch.linspace(-1.0, 1.0, self.filter_size, device=device, dtype=dtype)
+        yy, xx = torch.meshgrid(axis, axis, indexing='ij')
+        grid = torch.stack([xx, yy], dim=0).unsqueeze(0)
+        return grid.expand(batch_size, -1, -1, -1)
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+        coord_hi = self._coord_grid(batch_size, x.device, x.dtype)
+        if coord_hi.shape[-1] != x.shape[-1]:
+            coord_hi = torch.nn.functional.interpolate(
+                coord_hi, size=x.shape[-2:], mode='bilinear', align_corners=False)
+
+        trunk = self.trunk(torch.cat([x, coord_hi], dim=1))
+        color = self.color_proj(self.color_pool(x))
+        coord_lo = self.coord_proj(self._coord_grid(batch_size, x.device, x.dtype))
+        fused = torch.cat([trunk, color, coord_lo], dim=1)
+        return self.fuse(fused)
+
+
+class GatedInputSkipEncoderV8(nn.Module):
+    """Full-capacity trunk + gated input-level skip connection.
+
+    Combines the best properties of v5 and v6 in a domain-agnostic way:
+
+      * The conv trunk is IDENTICAL to v5 (3-layer strided, full embedding_dim
+        width).  v5 proved best for structural / textural classes (wall 96.5 %,
+        door 99.4 %, key 100 %).
+
+      * A lightweight input-level skip pools the raw observation to the latent
+        resolution and projects it to a small feature vector per token.  This
+        gives each token direct access to its local statistics (colour, texture)
+        without relying on the trunk to preserve them through three stride-2
+        layers — the general-purpose version of v6's hand-coded RGB shortcut.
+
+      * A learned **sigmoid gate** controls the per-token, per-channel blend
+        of trunk features and skip features.  When the gate is 0 the output
+        equals the pure trunk (v5 behaviour); when it opens the skip signal
+        is mixed in.  The network can learn to open the gate selectively for
+        tokens whose identity depends on raw input statistics (e.g. goal =
+        uniform green) while keeping it closed for tokens where the deep
+        trunk already provides sufficient discrimination (e.g. wall, door).
+
+    No SE attention, no coordinate grids, no multi-scale skips — each of
+    those was tried in v7 and **hurt** dominant-class accuracy (wall 96 → 78 %).
+    This design is the minimal intervention that adds input-identity awareness
+    to v5 without compromising its proven strengths.
+
+    Architecture (64 × 64 → 8 × 8, embedding_dim = 64):
+
+        Input (C, 64, 64)
+          ├─ Trunk (v5):  Conv(C→64, s=2) → Conv(64→128, s=2) → Conv(128→64, s=2)
+          │               → f_trunk (64, 8, 8)
+          │
+          └─ Input skip:  AdaptiveAvgPool2d(8) → Conv1×1(C→16) → ReLU
+                          → Conv1×1(16→16) → ReLU  → f_skip (16, 8, 8)
+
+        cat([f_trunk, f_skip]) = (80, 8, 8)
+          → gate  = σ(Conv1×1(80→64))               ∈ [0, 1]
+          → merge = ReLU(Conv1×1(80→64))
+          → out   = gate · merge + (1 − gate) · f_trunk     (gated residual)
+          → ResidualBlock → final (64, 8, 8)
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        import math
+
+        if len(input_dim) <= 1:
+            raise ValueError("GatedInputSkipEncoderV8 requires image observations")
+
+        C_in, H, W = input_dim
+        self.filter_size = filter_size
+
+        n_layers = int(round(math.log2(H / filter_size)))
+        assert n_layers >= 1
+        assert H // (2 ** n_layers) == filter_size, (
+            f"Input {H} / 2^{n_layers} != filter_size {filter_size}")
+
+        # --- v5-identical trunk (full width) ---
+        if n_layers == 1:
+            channels = [C_in, embedding_dim]
+        elif n_layers == 2:
+            channels = [C_in, 64, embedding_dim]
+        elif n_layers == 3:
+            channels = [C_in, 64, 128, embedding_dim]
+        elif n_layers == 4:
+            channels = [C_in, 32, 64, 128, embedding_dim]
+        else:
+            channels = ([C_in]
+                        + [min(64 * (2 ** i), 256) for i in range(n_layers - 1)]
+                        + [embedding_dim])
+
+        trunk_layers = []
+        for i in range(n_layers):
+            trunk_layers.append(nn.Conv2d(
+                channels[i], channels[i + 1],
+                kernel_size=4, stride=2, padding=1))
+            trunk_layers.append(nn.ReLU())
+        self.trunk = nn.Sequential(*trunk_layers)
+
+        # --- Input-level skip (domain-agnostic) ---
+        skip_dim = max(embedding_dim // 4, 8)          # 16 for D=64
+        self.input_pool = nn.AdaptiveAvgPool2d(filter_size)
+        self.skip_proj = nn.Sequential(
+            nn.Conv2d(C_in, skip_dim, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv2d(skip_dim, skip_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # --- Gated fusion ---
+        fused_dim = embedding_dim + skip_dim
+        self.gate_net = nn.Sequential(
+            nn.Conv2d(fused_dim, embedding_dim, kernel_size=1),
+            nn.Sigmoid(),
+        )
+        self.merge_net = nn.Sequential(
+            nn.Conv2d(fused_dim, embedding_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # --- Refinement ---
+        self.refine = ResidualBlock(embedding_dim, embedding_dim)
+
+    def forward(self, x):
+        f_trunk = self.trunk(x)                                     # (B, D, fs, fs)
+        f_skip = self.skip_proj(self.input_pool(x))                 # (B, skip, fs, fs)
+
+        combined = torch.cat([f_trunk, f_skip], dim=1)              # (B, D+skip, fs, fs)
+        gate = self.gate_net(combined)                              # (B, D, fs, fs) ∈ [0,1]
+        merged = self.merge_net(combined)                           # (B, D, fs, fs)
+
+        out = gate * merged + (1.0 - gate) * f_trunk               # gated residual
+        out = self.refine(out)
+        return out
+
+
+def make_ae_v8(input_dim, embedding_dim=None, filter_size=None):
+    """Full trunk + gated input skip encoder v8.
+
+    Domain-agnostic design: v5's proven trunk at full width, plus a learned
+    gated skip from pooled input features.  See GatedInputSkipEncoderV8.
+    """
+    import math
+    embedding_dim = embedding_dim or 64
+
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+
+    H, W = input_dim[1], input_dim[2]
+    filter_size = filter_size or 8
+
+    encoder = GatedInputSkipEncoderV8(
+        input_dim, embedding_dim=embedding_dim, filter_size=filter_size)
+
+    # Decoder mirrors v5 for fair comparison
+    n_layers = int(round(math.log2(H / filter_size)))
+    if n_layers == 1:
+        channels = [input_dim[0], embedding_dim]
+    elif n_layers == 2:
+        channels = [input_dim[0], 64, embedding_dim]
+    elif n_layers == 3:
+        channels = [input_dim[0], 64, 128, embedding_dim]
+    elif n_layers == 4:
+        channels = [input_dim[0], 32, 64, 128, embedding_dim]
+    else:
+        channels = ([input_dim[0]]
+                    + [min(64 * (2 ** i), 256) for i in range(n_layers - 1)]
+                    + [embedding_dim])
+
+    decoder_layers = []
+    for i in reversed(range(n_layers)):
+        decoder_layers.append(nn.ConvTranspose2d(
+            channels[i + 1], channels[i], kernel_size=4, stride=2, padding=1))
+        decoder_layers.append(nn.ReLU())
+    decoder_layers.append(nn.AdaptiveAvgPool2d((H, W)))
+    decoder = nn.Sequential(*decoder_layers)
+
+    return encoder, decoder
+
+
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation channel attention (Hu et al., 2018).
+
+    Domain-agnostic: learns per-channel importance weights via global average
+    pooling → bottleneck MLP → sigmoid gating.  This lets the encoder
+    dynamically emphasise colour-sensitive channels for uniform-texture
+    classes (e.g. goal) and texture-sensitive channels for patterned classes
+    (e.g. door/key) without any hard-coded domain knowledge.
+    """
+
+    def __init__(self, channels, reduction=4):
+        super().__init__()
+        mid = max(channels // reduction, 4)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, mid),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid, channels),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        B, C, _, _ = x.shape
+        scale = x.mean(dim=[2, 3])                     # (B, C)
+        scale = self.fc(scale).view(B, C, 1, 1)        # (B, C, 1, 1)
+        return x * scale
+
+
+class MultiScaleEncoderV7(nn.Module):
+    """Generalised multi-scale encoder with channel attention.
+
+    Improvements over v6 (which was MiniGrid-specific):
+      * No hand-crafted RGB pooling or coordinate grids.
+      * Multi-scale skip connections from *every* intermediate layer
+        preserve both fine-grained texture (door, key) and coarse colour
+        signals (goal) — a domain-agnostic alternative to the explicit
+        colour shortcut.
+      * Squeeze-and-Excitation (SE) attention lets the network learn which
+        channels matter on a per-sample basis, instead of relying on a
+        fixed colour / coordinate split.
+      * Learnable spatial positional embeddings (à la ViT) provide
+        location awareness without assuming a grid-world structure.
+      * Full-width backbone (embedding_dim channels in the last conv)
+        restores capacity that v6 sacrificed for its colour/coord paths.
+
+    Architecture (for 64×64 → 8×8, embedding_dim=64):
+
+        Input (C, 64, 64)
+          → L1: Conv(C→64,  k=4, s=2, p=1) + ReLU   → f1 (64, 32, 32)
+          → L2: Conv(64→128, k=4, s=2, p=1) + ReLU   → f2 (128, 16, 16)
+          → L3: Conv(128→D,  k=4, s=2, p=1) + ReLU   → f3 (D,   8,  8)
+
+        Skip-1: AvgPool(f1 → 8×8) → Conv1×1(64  → D//4) → s1 (D//4, 8, 8)
+        Skip-2: AvgPool(f2 → 8×8) → Conv1×1(128 → D//4) → s2 (D//4, 8, 8)
+
+        Fuse:  cat([f3, s1, s2])  → (D + D//2, 8, 8)
+               → Conv1×1 → ReLU  → (D, 8, 8)
+
+        SE attention  → channel re-weighting
+        + learnable pos_embed (1, D, 8, 8)
+        → ResidualBlock  → output (D, 8, 8)
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        import math
+
+        if len(input_dim) <= 1:
+            raise ValueError("MultiScaleEncoderV7 requires image observations")
+
+        C_in, H, W = input_dim
+        self.filter_size = filter_size
+
+        n_layers = int(round(math.log2(H / filter_size)))
+        assert n_layers >= 1
+        assert H // (2 ** n_layers) == filter_size, (
+            f"Input {H} / 2^{n_layers} != filter_size {filter_size}")
+
+        # --- backbone channel progression (same as v5) ---
+        if n_layers == 1:
+            channels = [C_in, embedding_dim]
+        elif n_layers == 2:
+            channels = [C_in, 64, embedding_dim]
+        elif n_layers == 3:
+            channels = [C_in, 64, 128, embedding_dim]
+        elif n_layers == 4:
+            channels = [C_in, 32, 64, 128, embedding_dim]
+        else:
+            channels = ([C_in]
+                        + [min(64 * (2 ** i), 256) for i in range(n_layers - 1)]
+                        + [embedding_dim])
+
+        # --- backbone layers (individually stored for skip access) ---
+        self.layers = nn.ModuleList()
+        for i in range(n_layers):
+            self.layers.append(nn.Sequential(
+                nn.Conv2d(channels[i], channels[i + 1],
+                          kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
+            ))
+
+        # --- multi-scale skip projections (all intermediate layers) ---
+        skip_dim = max(embedding_dim // 4, 8)
+        self.skip_projs = nn.ModuleList()
+        for i in range(n_layers - 1):          # skip from every layer except last
+            self.skip_projs.append(nn.Sequential(
+                nn.AdaptiveAvgPool2d(filter_size),
+                nn.Conv2d(channels[i + 1], skip_dim, kernel_size=1),
+                nn.ReLU(),
+            ))
+        total_skip_dim = skip_dim * (n_layers - 1)
+
+        # --- fusion ---
+        fused_dim = embedding_dim + total_skip_dim
+        self.fuse = nn.Sequential(
+            nn.Conv2d(fused_dim, embedding_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # --- channel attention ---
+        self.se = SEBlock(embedding_dim, reduction=4)
+
+        # --- learnable positional embedding ---
+        self.pos_embed = nn.Parameter(
+            torch.randn(1, embedding_dim, filter_size, filter_size) * 0.02)
+
+        # --- final refinement ---
+        self.refine = ResidualBlock(embedding_dim, embedding_dim)
+
+    def forward(self, x):
+        # Run backbone, collecting intermediate features
+        intermediates = []
+        h = x
+        for layer in self.layers:
+            h = layer(h)
+            intermediates.append(h)
+
+        backbone_out = intermediates[-1]                       # (B, D, fs, fs)
+
+        # Multi-scale skip connections
+        skips = []
+        for i, proj in enumerate(self.skip_projs):
+            skips.append(proj(intermediates[i]))
+
+        # Fuse
+        if skips:
+            fused = torch.cat([backbone_out] + skips, dim=1)
+        else:
+            fused = backbone_out
+        out = self.fuse(fused)
+
+        # Channel attention
+        out = self.se(out)
+
+        # Positional embedding
+        out = out + self.pos_embed
+
+        # Refinement
+        out = self.refine(out)
+        return out
+
+
+def make_ae_v7(input_dim, embedding_dim=None, filter_size=None):
+    """Multi-scale encoder v7 with SE attention + learned positions.
+
+    Domain-agnostic replacement for v6's MiniGrid-specific colour/coord paths.
+    See MultiScaleEncoderV7 docstring for architecture details.
+    """
+    import math
+    embedding_dim = embedding_dim or 64
+
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+
+    H, W = input_dim[1], input_dim[2]
+    filter_size = filter_size or 8
+
+    encoder = MultiScaleEncoderV7(input_dim, embedding_dim=embedding_dim,
+                                  filter_size=filter_size)
+
+    # Decoder mirrors v5 for fair comparison (only encoder changes)
+    n_layers = int(round(math.log2(H / filter_size)))
+    if n_layers == 1:
+        channels = [input_dim[0], embedding_dim]
+    elif n_layers == 2:
+        channels = [input_dim[0], 64, embedding_dim]
+    elif n_layers == 3:
+        channels = [input_dim[0], 64, 128, embedding_dim]
+    elif n_layers == 4:
+        channels = [input_dim[0], 32, 64, 128, embedding_dim]
+    else:
+        channels = ([input_dim[0]]
+                    + [min(64 * (2 ** i), 256) for i in range(n_layers - 1)]
+                    + [embedding_dim])
+
+    decoder_layers = []
+    for i in reversed(range(n_layers)):
+        decoder_layers.append(nn.ConvTranspose2d(
+            channels[i + 1], channels[i], kernel_size=4, stride=2, padding=1))
+        decoder_layers.append(nn.ReLU())
+    decoder_layers.append(nn.AdaptiveAvgPool2d((H, W)))
+    decoder = nn.Sequential(*decoder_layers)
+
+    return encoder, decoder
+
+
+def make_ae_v6(input_dim, embedding_dim=None, filter_size=None):
+    """Color- and coordinate-aware grid encoder for MiniGrid-style inputs."""
+    embedding_dim = embedding_dim or 64
+
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+
+    H, W = input_dim[1], input_dim[2]
+    filter_size = filter_size or 8
+
+    encoder = ColorCoordEncoderV6(input_dim, embedding_dim=embedding_dim, filter_size=filter_size)
+
+    # Decoder mirrors v5 so comparisons isolate the encoder change.
+    channels = [input_dim[0], 64, 128, embedding_dim]
+    decoder_layers = []
+    for i in reversed(range(3)):
+        decoder_layers.append(nn.ConvTranspose2d(
+            channels[i + 1], channels[i], kernel_size=4, stride=2, padding=1))
+        decoder_layers.append(nn.ReLU())
+    decoder_layers.append(nn.AdaptiveAvgPool2d((H, W)))
+    decoder = nn.Sequential(*decoder_layers)
+
+    return encoder, decoder
+
+
 def make_split_encoder_ae(input_dim, embedding_dim=None, ctx_channels=None, filter_size=None):
     """
     Split-encoder architecture: a lightweight local encoder (small RF) feeds the VQ
@@ -331,6 +1006,16 @@ def make_ae(input_dim, embedding_dim, filter_size, version='2'):
         return make_ae_v3(input_dim, embedding_dim, filter_size)
     elif version == '4':
         return make_ae_v4(input_dim, embedding_dim, filter_size)
+    elif version == '5':
+        return make_ae_v5(input_dim, embedding_dim, filter_size)
+    elif version == '6':
+        return make_ae_v6(input_dim, embedding_dim, filter_size)
+    elif version == '7':
+        return make_ae_v7(input_dim, embedding_dim, filter_size)
+    elif version == '8':
+        return make_ae_v8(input_dim, embedding_dim, filter_size)
+    elif version == '9':
+        return make_ae_v9(input_dim, embedding_dim, filter_size)
     elif version == 'nature_ae':
         return make_nature_ae(input_dim, embedding_dim, filter_size, vanilla=False)
     elif version == 'nature':
@@ -542,7 +1227,10 @@ def construct_trans_model(encoder, args, act_space, load=True):
                        model_vars=MODEL_VARS, model_hash=args.trans_model_hash)
         trans_trainer = ContinuousTransitionTrainer(
             trans_model, encoder=encoder, lr=args.trans_learning_rate, log_freq=-1,
-            log_norms=args.log_norms, grad_clip=args.ae_grad_clip, e2e_loss=args.e2e_loss)
+            log_norms=args.log_norms, grad_clip=args.ae_grad_clip, e2e_loss=args.e2e_loss,
+            reward_overestimate_coef=safe_getattr(args, 'trans_reward_overestimate_coef', 0.0),
+            reward_zero_target_coef=safe_getattr(args, 'trans_reward_zero_target_coef', 0.0),
+            reward_zero_margin=safe_getattr(args, 'trans_reward_zero_margin', 0.0))
 
     elif args.trans_model_type == 'shared_vq':
         # Don't track gradients if quantizer is external
@@ -570,7 +1258,10 @@ def construct_trans_model(encoder, args, act_space, load=True):
                        model_vars=MODEL_VARS, model_hash=args.trans_model_hash)
         trans_trainer = ContinuousTransitionTrainer(
             trans_model, encoder=encoder, lr=args.trans_learning_rate, log_freq=-1,
-            log_norms=args.log_norms, grad_clip=args.ae_grad_clip)
+            log_norms=args.log_norms, grad_clip=args.ae_grad_clip,
+            reward_overestimate_coef=safe_getattr(args, 'trans_reward_overestimate_coef', 0.0),
+            reward_zero_target_coef=safe_getattr(args, 'trans_reward_zero_target_coef', 0.0),
+            reward_zero_margin=safe_getattr(args, 'trans_reward_zero_margin', 0.0))
 
 
     elif args.trans_model_type == 'universal_vq':

@@ -30,7 +30,7 @@ from rl_utils import *
 from env_helpers import make_vec_env
 
 
-def save_best_model(ae_model, policy, critic, optimizer, step, args, avg_reward, suffix="best", target_ae=None):
+def save_best_model(ae_model, policy, critic, optimizer, step, args, avg_reward, suffix="best", target_ae=None, sem_head=None, trans_model=None):
     """
     Save a checkpoint. Filename: {run_name}_{suffix}_model.pt if run_name is set,
     else {suffix}_model.pt (backward compatible).
@@ -44,6 +44,8 @@ def save_best_model(ae_model, policy, critic, optimizer, step, args, avg_reward,
         'policy_state_dict': policy.state_dict(),
         'critic_state_dict': critic.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
+        'sem_head_state_dict': sem_head.state_dict() if sem_head is not None else None,
+        'trans_model_state_dict': trans_model.state_dict() if trans_model is not None else None,
         'args': vars(args),
         'model_info': {
             'ae_params': sum(p.numel() for p in ae_model.parameters()),
@@ -261,6 +263,72 @@ def train(args, encoder_model=None):
         encoder_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambdas)
         print(f'Encoder LR cosine annealing: {encoder_lr} -> 0 over {total_batches} batches (policy LR fixed)')
 
+    # ── World model (optional: auxiliary predictive loss + online training) ──
+    use_world_model = getattr(args, 'use_world_model', False)
+    trans_model = None
+    trans_trainer = None
+    wm_aux_coef = getattr(args, 'wm_aux_coef', 0.0)
+    wm_train_freq = getattr(args, 'wm_train_freq', 1)  # train every N batches
+
+    if use_world_model:
+        from model_construction import construct_trans_model
+        _raw_ae = getattr(ae_model, '_orig_mod', ae_model)
+        # Temporarily disable e2e_loss flag: construct_trans_model rejects
+        # discrete trans models with e2e_loss=True (that check is for the old
+        # continuous-model e2e path). Our e2e_loss is for the PPO encoder, not
+        # the transition model itself.
+        _saved_e2e = getattr(args, 'e2e_loss', False)
+        args.e2e_loss = False
+        trans_model, trans_trainer = construct_trans_model(
+            _raw_ae, args, act_space, load=False)
+        args.e2e_loss = _saved_e2e
+        trans_model = trans_model.to(args.device)
+        # Separate optimizer for transition model (keeps PPO optimizer untouched)
+        trans_optimizer = optim.Adam(trans_model.parameters(), lr=1e-3)
+        # Add transition model params to PPO optimizer IF aux loss is used,
+        # so that PPO's backward can update them jointly with encoder/policy.
+        if wm_aux_coef > 0:
+            optimizer.add_param_group({
+                'params': list(trans_model.parameters()),
+                'lr': args.learning_rate,
+            })
+        n_trans_params = sum(p.numel() for p in trans_model.parameters())
+        print(f'World model enabled: aux_coef={wm_aux_coef}, train_freq={wm_train_freq}')
+        print(f'Transition Model Params: {n_trans_params}')
+
+    # ── Semantic auxiliary head (optional: per-position object-type prediction) ──
+    use_semantic_aux = getattr(args, 'use_semantic_aux', False)
+    sem_head = None
+    sem_aux_coef = getattr(args, 'sem_aux_coef', 0.0)
+
+    if use_semantic_aux and args.e2e_loss:
+        sem_head_version = getattr(args, 'sem_head_version', 1)
+        n_latent = getattr(ae_model, 'n_latent_embeds', 81)
+        if sem_head_version == 2:
+            from shared.models.transition_models import SemanticHeadV2
+            sem_head = SemanticHeadV2(
+                n_latent=n_latent,
+                embedding_dim=args.embedding_dim,
+                n_classes=getattr(args, 'sem_n_classes', 11),
+                hidden_dim=getattr(args, 'sem_head_hidden', 128),
+            ).to(args.device)
+        else:
+            from shared.models.transition_models import SemanticHead
+            sem_head = SemanticHead(
+                n_latent=n_latent,
+                embedding_dim=args.embedding_dim,
+                n_classes=getattr(args, 'sem_n_classes', 11),
+                hidden_dim=getattr(args, 'sem_head_hidden', 64),
+            ).to(args.device)
+        n_sem_params = sum(p.numel() for p in sem_head.parameters())
+        print(f'Semantic aux enabled: coef={sem_aux_coef}, n_latent={n_latent}, '
+              f'n_classes={getattr(args, "sem_n_classes", 11)}, params={n_sem_params}')
+        # Add to PPO optimizer so gradients update sem_head jointly with encoder
+        optimizer.add_param_group({
+            'params': list(sem_head.parameters()),
+            'lr': args.learning_rate,
+        })
+
     ppo = PPOTrainer(
         env, policy, critic, ae_model, optimizer,
         ppo_iters=args.ppo_iters,
@@ -273,6 +341,14 @@ def train(args, encoder_model=None):
         max_grad_norm=args.ppo_max_grad_norm,
         e2e_loss=args.e2e_loss,
         target_ae=target_ae if use_ema else None,
+        trans_model=trans_model if use_world_model else None,
+        wm_aux_coef=wm_aux_coef,
+        sem_head=sem_head,
+        sem_aux_coef=sem_aux_coef,
+        sem_aux_start_reward=getattr(args, 'sem_aux_start_reward', 0.0),
+        sem_use_class_weights=getattr(args, 'sem_class_weights', True),
+        sem_focal_gamma=getattr(args, 'sem_focal_gamma', 0.0),
+        sem_pre_vq=getattr(args, 'sem_pre_vq', False),
     )
 
     replay_buffer = ReplayBuffer(args.replay_size) if args.ae_er_train else None
@@ -342,6 +418,7 @@ def train(args, encoder_model=None):
 
             obs_list, states_list, acts_list = [], [], []
             next_obs_list, rewards_list, gammas_list = [], [], []
+            sem_grids_list = []   # semantic labels for curr_obs at each step
 
             for _ in range(steps_per_update):
                 with torch.no_grad():
@@ -355,6 +432,27 @@ def train(args, encoder_model=None):
                 next_obs_np, rewards, terminated, truncated, _ = vec_env.step(acts.numpy())
                 dones = terminated | truncated
                 next_obs = torch.from_numpy(next_obs_np).float()
+
+                # Capture semantic grid (object type per cell) for current obs.
+                # Must be done BEFORE vec_env.step() since step may auto-reset envs.
+                if use_semantic_aux:
+                    _n_lat_side = int(np.round(np.sqrt(getattr(ae_model, 'n_latent_embeds', 81))))
+                    _sem_batch = []
+                    for _sub_env in vec_env.envs:
+                        _ug = _sub_env.unwrapped
+                        _ge = _ug.grid.encode()[:, :, 0].copy()  # (width, height) col-major
+                        _ge[_ug.agent_pos[0], _ug.agent_pos[1]] = OBJECT_TO_IDX['agent']
+                        _ge_rowmajor = _ge.T  # (height, width) row-major = image layout
+                        if _ge_rowmajor.shape != (_n_lat_side, _n_lat_side):
+                            # Resize to match latent grid (nearest-neighbour)
+                            from PIL import Image as _PIL_Image
+                            _ge_rowmajor = np.array(
+                                _PIL_Image.fromarray(_ge_rowmajor.astype(np.uint8)).resize(
+                                    (_n_lat_side, _n_lat_side), resample=0),  # NEAREST=0
+                                dtype=np.int64)
+                        _sem_batch.append(_ge_rowmajor.flatten())
+                    sem_grids_list.append(
+                        torch.tensor(np.stack(_sem_batch), dtype=torch.long))  # (N, n_latent)
 
                 # Store full N-tensors per timestep (time-major)
                 obs_list.append(curr_obs.clone())
@@ -387,7 +485,7 @@ def train(args, encoder_model=None):
                                 _raw = getattr(ae_model, '_orig_mod', ae_model)
                                 snapback_best_encoder_sd = {k: v.clone() for k, v in _raw.state_dict().items()}
                             if args.save:
-                                save_best_model(ae_model, policy, critic, optimizer, step, args, best_avg_reward, suffix="best", target_ae=target_ae)
+                                save_best_model(ae_model, policy, critic, optimizer, step, args, best_avg_reward, suffix="best", target_ae=target_ae, sem_head=sem_head, trans_model=trans_model)
 
                         # Snapback check
                         if use_snapback and train_encoder and not encoder_frozen_by_snapback and len(recent_rewards) >= reward_window:
@@ -396,6 +494,10 @@ def train(args, encoder_model=None):
                                                 snapback_decline_count, snapback_patience,
                                                 ae_model, snapback_best_encoder_sd, train_encoder, encoder_scheduler, step,
                                                 min_reward=snapback_min_reward)
+
+                        # Semantic aux gate: activate once reward is high enough
+                        if use_semantic_aux and len(recent_rewards) >= reward_window:
+                            ppo.maybe_activate_sem_aux(current_avg_reward)
 
                         run_stats['ep_length'].append(ep_l)
                         run_stats['ep_reward'].append(ep_r)
@@ -454,6 +556,10 @@ def train(args, encoder_model=None):
                 'rewards':  rewards_T.permute(1, 0).reshape(N * T),
                 'gammas':   gammas_T.permute(1, 0).reshape(N * T),
             }
+            if use_semantic_aux and sem_grids_list:
+                sem_T = torch.stack(sem_grids_list)   # [T, N, n_latent]
+                n_lat = sem_T.shape[-1]
+                batch_data['semantic_grid'] = sem_T.permute(1, 0, 2).reshape(N * T, n_lat)
 
         else:
             # ── Single-env rollout (original path) ──
@@ -540,7 +646,7 @@ def train(args, encoder_model=None):
                             _raw = getattr(ae_model, '_orig_mod', ae_model)
                             snapback_best_encoder_sd = {k: v.clone() for k, v in _raw.state_dict().items()}
                         if args.save:
-                            save_best_model(ae_model, policy, critic, optimizer, step, args, best_avg_reward, suffix="best", target_ae=target_ae)
+                            save_best_model(ae_model, policy, critic, optimizer, step, args, best_avg_reward, suffix="best", target_ae=target_ae, sem_head=sem_head, trans_model=trans_model)
 
                     # Snapback check
                     if use_snapback and train_encoder and not encoder_frozen_by_snapback and len(recent_rewards) >= reward_window:
@@ -603,7 +709,35 @@ def train(args, encoder_model=None):
         if step >= args.rl_start_step:
             loss_dict = ppo.train(batch_data)
             for k, v in loss_dict.items():
-                run_stats[k].append(v.item())
+                if isinstance(v, (int, float)):
+                    run_stats[k].append(v)
+                else:
+                    run_stats[k].append(v.item())
+
+        # ── Online transition model training (standalone, optional) ──
+        # Train the world model with its own optimizer on the same real data PPO just used.
+        # Only enabled when --wm_standalone_train is set. Without it, the transition model
+        # is still updated via the aux loss gradient inside the PPO backward pass.
+        if use_world_model and trans_trainer is not None and step >= args.rl_start_step \
+                and getattr(args, 'wm_standalone_train', False):
+            if _batch % wm_train_freq == 0:
+                _raw_ae_for_trans = getattr(ae_model, '_orig_mod', ae_model)
+                with torch.no_grad():
+                    # Encode obs / next_obs to get discrete target indices
+                    trans_obs = batch_data['obs']
+                    trans_next_obs = batch_data['next_obs']
+                    trans_acts = batch_data['acts'].squeeze(-1)
+                    trans_rewards = batch_data['rewards']
+                    trans_dones = (batch_data['gammas'] == 0).float()
+
+                # Train transition model (single-step, n=1)
+                trans_batch = [trans_obs, trans_acts, trans_next_obs, trans_rewards, trans_dones]
+                trans_model.train()
+                trans_loss_dict, _ = trans_trainer.train(trans_batch, n=1)
+                trans_model.eval()
+
+                for k, v in trans_loss_dict.items():
+                    run_stats[f'wm_{k}'].append(v.item())
 
         # EMA update target encoder after PPO batch
         if use_ema and train_encoder:
@@ -655,10 +789,10 @@ def train(args, encoder_model=None):
             print(f"   Overall average reward: {overall_avg_reward:.4f}")
             print(f"   Best rolling average: {best_report:.4f}")
 
-            save_best_model(ae_model, policy, critic, optimizer, step, args, final_avg_reward, suffix="final", target_ae=target_ae)
+            save_best_model(ae_model, policy, critic, optimizer, step, args, final_avg_reward, suffix="final", target_ae=target_ae, sem_head=sem_head, trans_model=trans_model)
         else:
             print("No episodes completed, saving final model anyway")
-            save_best_model(ae_model, policy, critic, optimizer, step, args, 0.0, suffix="final", target_ae=target_ae)
+            save_best_model(ae_model, policy, critic, optimizer, step, args, 0.0, suffix="final", target_ae=target_ae, sem_head=sem_head, trans_model=trans_model)
 
     return policy, critic
 

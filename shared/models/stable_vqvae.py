@@ -12,7 +12,8 @@ class StableVectorQuantizer(nn.Module):
     Highly stable vector quantizer that prevents NaN values
     """
 
-    def __init__(self, n_embeddings, embedding_dim, commitment_cost=0.25):
+    def __init__(self, n_embeddings, embedding_dim, commitment_cost=0.25,
+                 dead_code_threshold=1.0):
         super().__init__()
         self.n_embeddings = n_embeddings
         self.embedding_dim = embedding_dim
@@ -29,6 +30,7 @@ class StableVectorQuantizer(nn.Module):
         # Training parameters
         self.decay = 0.97
         self.eps = 1e-5
+        self.dead_code_threshold = dead_code_threshold
 
     def forward(self, inputs, mask=None):
         """
@@ -96,7 +98,13 @@ class StableVectorQuantizer(nn.Module):
         return quantized, vq_loss, perplexity, encoding_indices.view(input_shape[:-1])
 
     def _update_ema(self, flat_input, encodings):
-        """Update EMA statistics"""
+        """Update EMA statistics with dead-code restart.
+
+        Dead codes (cluster_usage < threshold) are reinitialized to randomly
+        sampled encoder outputs.  This prevents codebook collapse where rare
+        visual classes (e.g. goal, key) never claim a dedicated code because
+        dominant classes (wall, empty) absorb all EMA mass.
+        """
         with torch.no_grad():
             # Update cluster usage
             cluster_size = torch.sum(encodings, dim=0)
@@ -105,6 +113,22 @@ class StableVectorQuantizer(nn.Module):
             # Update embeddings
             embed_sum = torch.matmul(encodings.t(), flat_input)
             self.embed_avg.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
+
+            # ── Dead-code restart ──────────────────────────────────────
+            # Codes whose EMA usage is near zero are effectively dead.
+            # Replace them with randomly sampled encoder outputs so they
+            # can be reclaimed by under-represented input clusters.
+            dead_mask = self.cluster_usage < self.dead_code_threshold
+            n_dead = dead_mask.sum().item()
+            if n_dead > 0 and flat_input.shape[0] > 0:
+                # Sample random encoder outputs as replacement vectors
+                n_samples = flat_input.shape[0]
+                rand_idx = torch.randint(0, n_samples, (n_dead,),
+                                         device=flat_input.device)
+                new_vectors = flat_input[rand_idx]
+                # Reset EMA statistics for dead codes
+                self.embed_avg[dead_mask] = new_vectors
+                self.cluster_usage[dead_mask] = 1.0  # give them a fair start
 
             # Normalize embeddings
             n = self.cluster_usage.sum()

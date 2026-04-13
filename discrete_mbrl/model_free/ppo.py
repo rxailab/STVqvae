@@ -4,6 +4,33 @@ from torch.distributions import Categorical
 from torch.nn import functional as F
 
 
+def focal_cross_entropy(logits, targets, weight=None, gamma=2.0, reduction='mean'):
+    """Focal loss: -alpha_t * (1 - p_t)^gamma * log(p_t).
+    Down-weights easy (high-confidence correct) examples so the model
+    focuses gradient budget on hard/rare cases.
+
+    Args:
+        logits: (N, C) unnormalized class scores
+        targets: (N,) integer class labels
+        weight: (C,) per-class weight tensor (optional, like CE class weights)
+        gamma: focusing parameter (0 = standard CE, 2 = strong focusing)
+        reduction: 'mean' or 'sum'
+    """
+    log_p = F.log_softmax(logits, dim=-1)          # (N, C)
+    p = log_p.exp()                                 # (N, C)
+    # Gather the probabilities of the true class
+    p_t = p.gather(1, targets.unsqueeze(1)).squeeze(1)   # (N,)
+    log_p_t = log_p.gather(1, targets.unsqueeze(1)).squeeze(1)  # (N,)
+    focal_weight = (1 - p_t) ** gamma               # (N,)
+    loss = -focal_weight * log_p_t                   # (N,)
+    if weight is not None:
+        alpha_t = weight[targets]                    # (N,)
+        loss = alpha_t * loss
+    if reduction == 'mean':
+        return loss.mean()
+    return loss.sum()
+
+
 def ortho_init(ae, policy, critic):
   """
   Initialize the weights of the actor-critic and autoencoder
@@ -46,7 +73,9 @@ class PPOTrainer():
       epsilon=1e-7, ppo_iters=20, ppo_clip=0.2, value_coef=0.5,
       minibatch_size=32, entropy_coef=0.003, gae_lambda=0,
       norm_advantages=False, max_grad_norm=0.5, e2e_loss=False,
-      target_ae=None,
+      target_ae=None, trans_model=None, wm_aux_coef=0.0,
+      sem_head=None, sem_aux_coef=0.0, sem_aux_start_reward=0.0, sem_use_class_weights=True,
+      sem_focal_gamma=0.0, sem_pre_vq=False,
     ):
     self.n_acts = env.action_space.n
     self.policy = policy
@@ -65,11 +94,29 @@ class PPOTrainer():
     self.norm_advantages = norm_advantages
     self.max_grad_norm = max_grad_norm
     self.e2e_loss = e2e_loss
+    self.trans_model = trans_model      # DiscreteTransitionModel for auxiliary loss
+    self.wm_aux_coef = wm_aux_coef     # coefficient for world-model auxiliary loss
+    self.sem_head = sem_head            # SemanticHead for per-position object-type prediction
+    self.sem_aux_coef = sem_aux_coef   # coefficient for semantic auxiliary loss
+    self.sem_aux_start_reward = sem_aux_start_reward  # reward gate: only apply sem_aux after this
+    self.sem_aux_active = (sem_aux_start_reward <= 0)  # active immediately if no gate
+    self.sem_use_class_weights = sem_use_class_weights  # use inverse-freq weighting
+    self.sem_focal_gamma = sem_focal_gamma  # focal loss gamma (0 = standard CE)
+    self.sem_pre_vq = sem_pre_vq        # apply sem loss to pre-VQ encoder output (direct grad)
+    self.sem_class_weights = None       # computed lazily from first batch
     self.policy_losses = []
     self.critic_losses = []
     self.step_idx = 1
 
   
+  def maybe_activate_sem_aux(self, current_reward):
+    """Activate semantic aux loss once reward exceeds the start gate."""
+    if not self.sem_aux_active and self.sem_head is not None \
+            and current_reward >= self.sem_aux_start_reward:
+      self.sem_aux_active = True
+      print(f'[SEM_AUX] Activated at reward={current_reward:.4f} '
+            f'(gate={self.sem_aux_start_reward:.4f})')
+
   def calculate_gaes(self, rewards, values, next_values, gammas, decay=0.95):
     """
     Return the General Advantage Estimates from the 
@@ -134,7 +181,8 @@ class PPOTrainer():
       with torch.no_grad():
         last_state = _stable_ae.encode(
           batch_data['next_obs'][-1:].to(self.device),
-          return_one_hot=True)
+          return_one_hot=not self.e2e_loss,
+          return_quantized=self.e2e_loss)
         last_value = self.critic(last_state).squeeze(dim=0)
 
       next_values = torch.cat([values[1:], last_value])
@@ -152,7 +200,14 @@ class PPOTrainer():
       'old_act_probs': old_act_probs,
       'old_values': values,
       'advantages': advantages,
-      'returns': returns}
+      'returns': returns,
+    }
+    # Include next_obs for world-model auxiliary loss (predict next state)
+    if self.trans_model is not None and self.wm_aux_coef > 0:
+      train_data['next_obs'] = batch_data['next_obs'].to(self.device)
+    # Include semantic_grid for semantic auxiliary loss (predict per-cell object type)
+    if self.sem_head is not None and self.sem_aux_coef > 0 and 'semantic_grid' in batch_data:
+      train_data['semantic_grid'] = batch_data['semantic_grid'].to(self.device)
 
     policy_losses = []
     critic_losses = []
@@ -208,6 +263,86 @@ class PPOTrainer():
         total_loss = policy_loss + self.value_coef * value_loss \
           + self.entropy_coef * entropy_loss
 
+        # World-model auxiliary predictive loss: predict next state from current
+        # state + action. Gradient flows through encoder via straight-through,
+        # shaping the representation to be temporally predictable.
+        wm_aux_loss_val = 0.0
+        if self.trans_model is not None and self.wm_aux_coef > 0 and self.e2e_loss:
+            # Re-encode current obs with STE (gradient-enabled) — reuse the
+            # states we already computed for PPO if they are quantized embeddings
+            cont_states = minibatch['states']  # (B, flat_dim), has STE grads
+
+            # Get discrete target indices for next_obs (no gradient needed)
+            with torch.no_grad():
+                next_indices = self.ae.encode(minibatch['next_obs'])  # (B, n_latent)
+
+            # Predict next state from continuous embeddings (gradient flows to encoder)
+            pred_logits, pred_reward, _ = self.trans_model.forward_from_continuous(
+                cont_states, minibatch['acts'].squeeze(-1), return_logits=True)
+
+            # Cross-entropy: pred_logits (B, n_embeddings, n_latent) vs next_indices (B, n_latent)
+            aux_state_loss = F.cross_entropy(pred_logits, next_indices, reduction='mean')
+
+            # Reward prediction (MSE against actual rewards from batch)
+            # Note: minibatch['returns'] includes discounted future, use raw rewards
+            # if available; otherwise skip reward aux to avoid noisy targets.
+            wm_aux_loss = aux_state_loss
+            wm_aux_loss_val = wm_aux_loss.item()
+            total_loss = total_loss + self.wm_aux_coef * wm_aux_loss
+
+        # Semantic auxiliary loss: predict per-position object type from current state.
+        # Gradient flows through STE back to the encoder, nudging spatial codes to be
+        # semantically distinct (wall ≠ lava ≠ empty ≠ agent).
+        # Gated by sem_aux_start_reward: only activates after reward exceeds threshold
+        # to let the policy anchor the representation first.
+        sem_aux_loss_val = 0.0
+        if self.sem_head is not None and self.sem_aux_coef > 0 and self.e2e_loss \
+                and self.sem_aux_active and 'semantic_grid' in minibatch:
+            if self.sem_pre_vq:
+                # Re-encode raw obs to get pre-VQ continuous features (direct gradient)
+                enc_out = self.ae.encoder(minibatch['obs'])    # (B, C, H, W)
+                B_enc = enc_out.shape[0]
+                n_lat_side = enc_out.shape[2]
+                n_lat_sq = n_lat_side * n_lat_side
+                sem_input = enc_out.view(B_enc, -1, n_lat_sq).permute(0, 2, 1)  # (B, n_lat, C)
+                # Use a simple linear head directly (SemanticHead's forward expects flat)
+                sem_input_flat = enc_out.view(B_enc, -1)  # (B, C*H*W)
+                sem_logits = self.sem_head(sem_input_flat)  # (B, n_latent, n_classes)
+            else:
+                cont_states = minibatch['states']       # (B, n_latent * embedding_dim), STE grads
+                sem_logits = self.sem_head(cont_states) # (B, n_latent, n_classes)
+            sem_targets = minibatch['semantic_grid'].long()  # (B, n_latent)
+            B_sem, n_lat, n_cls = sem_logits.shape
+
+            # Lazy-init inverse-frequency class weights (computed once from first batch)
+            if self.sem_class_weights is None and self.sem_use_class_weights:
+                flat_t = sem_targets.view(-1)
+                counts = torch.bincount(flat_t, minlength=n_cls).float().clamp(min=1)
+                inv_freq = counts.sum() / (n_cls * counts)
+                # Cap at 20× to prevent extreme weight on very rare classes
+                inv_freq = inv_freq.clamp(max=20.0)
+                self.sem_class_weights = inv_freq.to(self.device)
+                print(f'[SEM_AUX] Class weights: '
+                      + ', '.join(f'{i}:{w:.1f}' for i, w in enumerate(inv_freq) if w < 19.5))
+
+            if self.sem_focal_gamma > 0:
+                sem_loss = focal_cross_entropy(
+                    sem_logits.view(B_sem * n_lat, n_cls),
+                    sem_targets.view(B_sem * n_lat),
+                    weight=self.sem_class_weights,
+                    gamma=self.sem_focal_gamma,
+                    reduction='mean'
+                )
+            else:
+                sem_loss = F.cross_entropy(
+                    sem_logits.view(B_sem * n_lat, n_cls),
+                    sem_targets.view(B_sem * n_lat),
+                    weight=self.sem_class_weights,
+                    reduction='mean'
+                )
+            sem_aux_loss_val = sem_loss.item()
+            total_loss = total_loss + self.sem_aux_coef * sem_loss
+
         policy_losses.append(policy_loss.item())
         critic_losses.append(value_loss.item())
         entropy_losses.append(entropy_loss.item())
@@ -219,8 +354,13 @@ class PPOTrainer():
           torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
         self.optimizer.step()
 
-    return {
+    result = {
       'policy_loss': np.mean(policy_losses),
       'critic_loss': np.mean(critic_losses),
-      'entropy_loss': np.mean(entropy_losses)
+      'entropy_loss': np.mean(entropy_losses),
     }
+    if self.trans_model is not None and self.wm_aux_coef > 0:
+      result['wm_aux_loss'] = wm_aux_loss_val
+    if self.sem_head is not None and self.sem_aux_coef > 0:
+      result['sem_aux_loss'] = sem_aux_loss_val
+    return result

@@ -74,8 +74,50 @@ def make_mf_arg_parser():
                       help='Prefix for saved model filenames, e.g. "e2ephased" saves '
                            'e2ephased_best_model.pt / e2ephased_final_model.pt.')
 
+  # World model integration (auxiliary predictive loss + online training)
+  parser.add_argument('--use_world_model', action='store_true', default=False,
+                      help='Enable online world model training and auxiliary predictive loss.')
+  parser.add_argument('--wm_aux_coef', type=float, default=0.1,
+                      help='Coefficient for world-model auxiliary loss (next-state prediction). '
+                           'Shapes encoder to learn temporally-predictable representations.')
+  parser.add_argument('--wm_train_freq', type=int, default=1,
+                      help='Train transition model every N PPO batches.')
+  parser.add_argument('--wm_standalone_train', action='store_true', default=False,
+                      help='Also train the transition model with its own optimizer after the PPO '
+                           'update (in addition to the aux loss in PPO). Exp #30 used this; '
+                           'exp #31 omits it to avoid redundant updates.')
+
+  # Semantic auxiliary loss (per-position object-type prediction)
+  parser.add_argument('--use_semantic_aux', action='store_true', default=False,
+                      help='Enable semantic auxiliary loss: predict MiniGrid object type '
+                           'at each spatial token position from the quantized embeddings.')
+  parser.add_argument('--sem_aux_coef', type=float, default=0.05,
+                      help='Coefficient for semantic auxiliary loss (default 0.05).')
+  parser.add_argument('--sem_head_hidden', type=int, default=64,
+                      help='Hidden dimension for the SemanticHead MLP (default 64).')
+  parser.add_argument('--sem_n_classes', type=int, default=11,
+                      help='Number of object-type classes (default 11 = MiniGrid OBJECT_TO_IDX).')
+  parser.add_argument('--sem_aux_start_reward', type=float, default=0.0,
+                      help='Reward gate for semantic aux: only activate after rolling avg reward '
+                           'exceeds this threshold. Prevents sem gradient from destabilising the '
+                           'encoder before the policy anchors the representation. (default 0.0 = no gate)')
+  parser.add_argument('--sem_class_weights', action='store_true', default=True,
+                      help='Use inverse-frequency class weights in semantic CE loss (default True). '
+                           'Upweights rare classes (lava, goal, agent) by up to 20×.')
+  parser.add_argument('--no_sem_class_weights', action='store_false', dest='sem_class_weights',
+                      help='Disable class weighting for semantic CE loss.')
+  parser.add_argument('--sem_head_version', type=int, default=1, choices=[1, 2],
+                      help='SemanticHead version: 1=original MLP, 2=pos encoding + local conv + deeper MLP')
+  parser.add_argument('--sem_focal_gamma', type=float, default=0.0,
+                      help='Focal loss gamma for semantic CE. 0=standard CE, 2=strong focusing on hard examples.')
+  parser.add_argument('--sem_pre_vq', action='store_true', default=False,
+                      help='Apply semantic loss to PRE-VQ encoder output (direct gradient, no STE). '
+                           'Bypasses the quantization bottleneck so the encoder gets clean gradient '
+                           'to separate visually similar classes (e.g., goal vs empty).')
+
   parser.set_defaults(ae_recon_loss=False, ppo_norm_advantages=False, ortho_init=False,
-                      encoder_lr_cosine=False)
+                      encoder_lr_cosine=False, use_world_model=False, wm_standalone_train=False,
+                      use_semantic_aux=False)
  
   return parser
 
