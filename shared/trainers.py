@@ -1120,6 +1120,9 @@ class ContinuousTransitionTrainer:
         lr: float = 1e-3,
         grad_clip: float = 0,
         e2e_loss: bool = False,
+        reward_overestimate_coef: float = 0.0,
+        reward_zero_target_coef: float = 0.0,
+        reward_zero_margin: float = 0.0,
     ):
         self.model = transition_model
         self.encoder = encoder
@@ -1129,6 +1132,9 @@ class ContinuousTransitionTrainer:
         self.default_gamma = 0.99
         self.grad_clip = grad_clip
         self.e2e_loss = e2e_loss
+        self.reward_overestimate_coef = reward_overestimate_coef
+        self.reward_zero_target_coef = reward_zero_target_coef
+        self.reward_zero_margin = reward_zero_margin
 
         if self.e2e_loss:
             self.optimizer = optim.Adam(list(self.model.parameters()) + list(self.encoder.parameters()), lr=lr)
@@ -1201,6 +1207,23 @@ class ContinuousTransitionTrainer:
 
             reward_loss = F.mse_loss(reward_preds.squeeze(), rewards, reduction='none')
             losses[f'{i + 1}_step_reward_loss'] = reward_loss.masked_select(loss_mask.bool()).mean()
+
+            if self.reward_overestimate_coef > 0:
+                reward_over = F.relu(reward_preds.squeeze() - rewards)
+                reward_over_loss = reward_over.pow(2)
+                losses[f'{i + 1}_step_reward_overestimate_penalty'] = \
+                    self.reward_overestimate_coef * reward_over_loss.masked_select(loss_mask.bool()).mean()
+
+            if self.reward_zero_target_coef > 0:
+                zero_reward_mask = torch.logical_and(
+                    loss_mask.bool(),
+                    torch.isclose(rewards, torch.zeros_like(rewards))
+                )
+                if zero_reward_mask.any():
+                    reward_fp = F.relu(reward_preds.squeeze() - self.reward_zero_margin)
+                    reward_fp_loss = reward_fp.pow(2)
+                    losses[f'{i + 1}_step_reward_zero_target_penalty'] = \
+                        self.reward_zero_target_coef * reward_fp_loss.masked_select(zero_reward_mask).mean()
 
             gamma_loss = F.mse_loss(gamma_preds.squeeze(), gammas, reduction='none')
             losses[f'{i + 1}_step_gamma_loss'] = gamma_loss.masked_select(loss_mask.bool()).mean()

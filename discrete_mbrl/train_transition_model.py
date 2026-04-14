@@ -27,16 +27,21 @@ def train_trans_model(args, encoder_model=None):
     train_loader, test_loader, valid_loader = prepare_dataloaders(
         args.env_name, n=args.max_transitions, batch_size=args.batch_size,
         n_step=args.n_train_unroll, preprocess=args.preprocess, randomize=True,
-        n_preload=args.n_preload, preload_all=args.preload_data,
+        # Force full preload for transition training to avoid per-sample HDF5 IO.
+        n_preload=args.n_preload, preload_all=True,
         extra_buffer_keys=args.extra_buffer_keys)
 
     print(f'Data split: {len(train_loader.dataset)}/{len(test_loader.dataset)}/{len(valid_loader.dataset)}')
 
     if encoder_model is None:
         print('Constructing encoder...')
-        sample_obs = next(iter(train_loader))[0][0]
-        if args.n_train_unroll > 1:
-            sample_obs = sample_obs[0]
+        # Avoid loading a full batch just to infer input shape.
+        sample_item = train_loader.dataset[0]
+        sample_obs = sample_item[0] if isinstance(sample_item, (tuple, list)) else sample_item
+        if isinstance(sample_obs, torch.Tensor):
+            # n-step datasets often store obs as [T, C, H, W]
+            if sample_obs.ndim >= 4:
+                sample_obs = sample_obs[0]
         encoder_model = construct_ae_model(
             sample_obs.shape, args)[0]
     encoder_model = encoder_model.to(args.device)

@@ -1,5 +1,4 @@
 import gc
-import psutil
 import os
 import sys
 import time
@@ -9,7 +8,6 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-import seaborn as sns
 from stable_baselines3.common.vec_env import DummyVecEnv
 from tqdm import tqdm
 
@@ -23,7 +21,18 @@ from model_construction import *
 from utils import *
 from eval_policies.policies import load_policy
 
-sns.set()
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+try:
+    import seaborn as sns
+except ImportError:
+    sns = None
+
+if sns is not None:
+    sns.set()
 
 GAMMA_CONST = 0.99
 N_EXAMPLE_IMGS = 15
@@ -54,6 +63,13 @@ def get_gpu_memory_info():
         reserved = torch.cuda.memory_reserved() / 1024 ** 3
         return f"GPU Memory - Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB"
     return "GPU not available"
+
+
+def get_process_memory_gb():
+    """Best-effort RSS reporting without requiring psutil."""
+    if psutil is None:
+        return float("nan")
+    return psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3
 
 
 def calculate_trans_losses_efficient(
@@ -330,7 +346,7 @@ def eval_model(args, encoder_model=None, trans_model=None):
             DISCRETE_TRANS_TYPES = DISCRETE_TRANS_TYPES + ('universal_vq',)
 
     clear_gpu_memory()
-    print(f'Memory usage after model loading: {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3:.2f} GB')
+    print(f'Memory usage after model loading: {get_process_memory_gb():.2f} GB')
     print(f"🧠 {get_gpu_memory_info()}")
 
     torch.manual_seed(SEED)
@@ -372,7 +388,7 @@ def eval_model(args, encoder_model=None, trans_model=None):
     log_metrics({'encoder_recon_loss': encoder_recon_loss}, args)
 
     clear_gpu_memory()
-    print(f'Memory usage after encoder test: {psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3:.2f} GB')
+    print(f'Memory usage after encoder test: {get_process_memory_gb():.2f} GB')
 
     # Sample random latent vectors eval (reduced)
     print('Sampling random latent vectors...')

@@ -2,12 +2,16 @@ import math
 
 from einops import rearrange
 from gym import spaces
+from gymnasium import spaces as gymnasium_spaces
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from .models import max_one_hot, mlp, sample_one_hot
+
+
+DISCRETE_SPACE_TYPES = (spaces.Discrete, gymnasium_spaces.Discrete)
 
 
 class DiscreteTransitionModel(nn.Module):
@@ -26,7 +30,7 @@ class DiscreteTransitionModel(nn.Module):
     # This can work with not truly discrete states
     self.use_soft_embeds = use_soft_embeds
     self.return_logits = return_logits
-    if isinstance(act_space, spaces.Discrete):
+    if isinstance(act_space, DISCRETE_SPACE_TYPES):
       self.act_dim = act_space.n
       self.act_dtype = torch.long
     else:
@@ -127,6 +131,39 @@ class DiscreteTransitionModel(nn.Module):
         acts = acts.view(-1, self.act_dim)  # Flatten if multi-step
       return acts
 
+  def forward_from_continuous(self, flat_embeds: torch.Tensor, acts: torch.Tensor,
+                              return_logits=True):
+    """Forward pass using pre-computed continuous embeddings (e.g. from VQVAE
+    ``return_quantized=True``).  This bypasses ``self.embeddings``, preserving
+    straight-through gradients from the encoder so an auxiliary predictive loss
+    can shape the encoder representation.
+
+    Args:
+        flat_embeds: (B, input_dim * embedding_dim) continuous quantized embeddings
+        acts: (B,) discrete action indices
+        return_logits: if True return raw logits, else return sampled state indices
+
+    Returns:
+        (next_state_logits_or_indices, reward, gamma)
+    """
+    processed_acts = self.prepare_acts(acts)
+    if flat_embeds.shape[0] != processed_acts.shape[0]:
+      min_batch = min(flat_embeds.shape[0], processed_acts.shape[0])
+      flat_embeds = flat_embeds[:min_batch]
+      processed_acts = processed_acts[:min_batch]
+
+    input_embeds = torch.cat([flat_embeds, processed_acts], dim=1)
+    z = self.shared_layers(input_embeds)
+
+    state_logits = self.state_head(z)
+    state_logits = state_logits.reshape(z.shape[0], self.n_embeddings, self.input_dim)
+    reward = self.reward_head(z)
+    gamma = torch.sigmoid(self.gamma_head(z))
+
+    if return_logits:
+      return state_logits, reward, gamma
+    return self.logits_to_state(state_logits), reward, gamma
+
   def forward(self, x: torch.Tensor, acts: torch.Tensor,
               oh_outcomes=None, return_one_hots=False,
               return_logits=False, return_stoch_logits=False):
@@ -203,7 +240,7 @@ class ContinuousTransitionModel(nn.Module):
       self.logits_to_state = logits_to_state_func
 
     self.input_dim = input_dim
-    if isinstance(act_space, spaces.Discrete):
+    if isinstance(act_space, DISCRETE_SPACE_TYPES):
       self.act_dim = act_space.n
       self.act_dtype = torch.long
     else:
@@ -269,11 +306,6 @@ class ContinuousTransitionModel(nn.Module):
               return_stoch_logits: bool = False):
     x = x.view(x.shape[0], self.input_dim)
     processed_acts = self.prepare_acts(acts)
-    if acts.dim() == 1:
-      acts = acts.unsqueeze(-1)  # Convert from [batch_size] to [batch_size, 1]
-
-    processed_acts = acts  # or whatever processing you do to acts
-
     input_embeds = torch.cat([x, processed_acts], dim=1)
 
     if self.stochastic == 'categorical':
@@ -302,6 +334,118 @@ class ContinuousTransitionModel(nn.Module):
     return states, reward, gamma
 
 
+class SemanticHead(nn.Module):
+  """Per-position semantic classifier for VQVAE spatial tokens.
+
+  Takes flat quantized embeddings (B, n_latent * embedding_dim) and predicts
+  object-type class logits (B, n_latent, n_classes) independently for each
+  of the n_latent spatial positions. Used as an auxiliary loss to ground
+  each codebook token to the MiniGrid object type at the corresponding cell.
+
+  MiniGrid OBJECT_TO_IDX: unseen=0, empty=1, wall=2, floor=3, door=4,
+                           key=5, ball=6, box=7, goal=8, lava=9, agent=10
+  """
+  def __init__(self, n_latent=81, embedding_dim=64, n_classes=11, hidden_dim=64):
+    super().__init__()
+    self.n_latent = n_latent
+    self.embedding_dim = embedding_dim
+    self.n_classes = n_classes
+    self.head = nn.Sequential(
+      nn.Linear(embedding_dim, hidden_dim),
+      nn.ReLU(),
+      nn.Linear(hidden_dim, n_classes),
+    )
+
+  def forward(self, flat_embeds):
+    """
+    Args:
+        flat_embeds: (B, embedding_dim * n_latent) continuous quantized embeddings
+                     with straight-through gradients from the VQVAE encoder.
+                     Layout is channels-first: the VQVAE quantized output is
+                     (B, C, H, W) flattened to (B, C*H*W) where C=embedding_dim.
+    Returns:
+        logits: (B, n_latent, n_classes) per-position class logits
+    """
+    B = flat_embeds.shape[0]
+    # VQVAE quantized is (B, C, H, W) -> view(B, -1) -> (B, C*H*W) channels-first
+    # Reshape to (B, C, n_latent) then transpose to (B, n_latent, C) so each
+    # position gets its full embedding_dim-dimensional vector.
+    spatial = flat_embeds.view(B, self.embedding_dim, self.n_latent)  # (B, C, n_lat)
+    spatial = spatial.permute(0, 2, 1)  # (B, n_lat, C) — per-position embeddings
+    return self.head(spatial)  # (B, n_latent, n_classes)
+
+
+class SemanticHeadV2(nn.Module):
+  """Improved per-position semantic classifier with positional encoding and
+  local context aggregation.
+
+  Improvements over SemanticHead v1:
+    1. Learnable positional embeddings — lets the head exploit spatial priors
+       (walls always at borders, agent/goal at specific regions).
+    2. Local context via 3×3 depth-wise conv on the 2D token grid — each
+       position sees its immediate neighbors, breaking the pure per-position
+       independence that made rare-class detection hard.
+    3. Deeper MLP (3 layers) with LayerNorm for stable training at higher coefs.
+    4. Optional focal loss support via `forward()` returning logits.
+
+  Architecture:
+    embed (64) + pos_embed (64) → concat (128) → 3×3 DW-Conv (128) → LN →
+    Linear(128→hidden) → ReLU → LN → Linear(hidden→hidden) → ReLU →
+    Linear(hidden→n_classes)
+  """
+  def __init__(self, n_latent=81, embedding_dim=64, n_classes=11, hidden_dim=128):
+    super().__init__()
+    self.n_latent = n_latent
+    self.embedding_dim = embedding_dim
+    self.n_classes = n_classes
+    self.grid_side = int(math.sqrt(n_latent))
+    assert self.grid_side ** 2 == n_latent, f'n_latent must be a perfect square, got {n_latent}'
+
+    # Learnable positional encoding (one vector per grid position)
+    self.pos_embed = nn.Parameter(torch.randn(1, n_latent, embedding_dim) * 0.02)
+
+    # Local context: 3×3 depth-wise conv over 2D token grid
+    in_ch = embedding_dim * 2  # embed + pos_embed concatenated
+    self.local_conv = nn.Conv2d(in_ch, in_ch, kernel_size=3, padding=1, groups=in_ch)
+    self.ln_conv = nn.LayerNorm(in_ch)
+
+    # Deeper classification head
+    self.head = nn.Sequential(
+      nn.Linear(in_ch, hidden_dim),
+      nn.ReLU(),
+      nn.LayerNorm(hidden_dim),
+      nn.Linear(hidden_dim, hidden_dim),
+      nn.ReLU(),
+      nn.Linear(hidden_dim, n_classes),
+    )
+
+  def forward(self, flat_embeds):
+    """
+    Args:
+        flat_embeds: (B, embedding_dim * n_latent) channels-first flat embeddings
+    Returns:
+        logits: (B, n_latent, n_classes)
+    """
+    B = flat_embeds.shape[0]
+    S = self.grid_side
+
+    # Reshape to per-position embeddings
+    spatial = flat_embeds.view(B, self.embedding_dim, self.n_latent)  # (B, C, n_lat)
+    spatial = spatial.permute(0, 2, 1)  # (B, n_lat, C)
+
+    # Add positional encoding and concatenate
+    pos = self.pos_embed.expand(B, -1, -1)  # (B, n_lat, C)
+    x = torch.cat([spatial, pos], dim=-1)   # (B, n_lat, 2C)
+
+    # Local context via 3×3 conv on 2D grid
+    x_2d = x.permute(0, 2, 1).view(B, -1, S, S)  # (B, 2C, S, S)
+    x_2d = self.local_conv(x_2d)                  # (B, 2C, S, S)
+    x = x_2d.view(B, -1, self.n_latent).permute(0, 2, 1)  # (B, n_lat, 2C)
+    x = self.ln_conv(x)
+
+    return self.head(x)  # (B, n_latent, n_classes)
+
+
 class UniversalVQTransitionModel(nn.Module):
   def __init__(self, input_dim, n_embeddings, embedding_dim, act_space,
       hidden_sizes=[256, 256], state_head_size=None, reward_head_size=64,
@@ -323,7 +467,7 @@ class UniversalVQTransitionModel(nn.Module):
     # This can work with not truly discrete states
     self.use_soft_embeds = use_soft_embeds
     self.return_logits = return_logits
-    if isinstance(act_space, spaces.Discrete):
+    if isinstance(act_space, DISCRETE_SPACE_TYPES):
       self.act_dim = act_space.n
       self.act_dtype = torch.long
     else:
@@ -543,7 +687,7 @@ class TransformerTransitionModel(nn.Module):
     self.model_type = 'Transformer'
     self.embedding_dim = embedding_dim
     self.n_embeddings = n_embeddings
-    if isinstance(act_space, spaces.Discrete):
+    if isinstance(act_space, DISCRETE_SPACE_TYPES):
       self.act_dim = act_space.n
       self.act_dtype = torch.long
     else:
@@ -666,7 +810,7 @@ class TransformerDecTransitionModel(nn.Module):
     self.model_type = 'TransformerDec'
     self.embedding_dim = embedding_dim
     self.n_embeddings = n_embeddings
-    if isinstance(act_space, spaces.Discrete):
+    if isinstance(act_space, DISCRETE_SPACE_TYPES):
       self.act_dim = act_space.n
       self.act_dtype = torch.long
     else:

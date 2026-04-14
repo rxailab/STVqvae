@@ -1,7 +1,6 @@
 import argparse
 from argparse import Namespace
 import os
-import psutil
 import platform
 from einops import rearrange
 from gym.envs.mujoco import MujocoEnv
@@ -14,6 +13,11 @@ from tqdm import tqdm
 from visualization import states_to_imgs
 # from model_construction import CONTINUOUS_ENCODER_TYPES, DISCRETE_ENCODER_TYPES, add_model_args
 from env_helpers import check_env_name
+
+try:
+    import psutil  # noqa: F401
+except ImportError:
+    psutil = None
 
 # Global configuration for observation resizing
 OBS_RESIZE_CONFIG = {
@@ -302,6 +306,28 @@ def make_argparser(parser=None):
     parser.add_argument('--env_max_steps', type=int, default=None)
     parser.add_argument('--rl_unroll_steps', type=int, default=-1)
     parser.add_argument('--rl_train_steps', type=int, default=0)
+    parser.add_argument('--rl_stage_unrolls', type=str, default='',
+                        help='Comma-separated curriculum of world-model RL horizons, e.g. "8,12,16".')
+    parser.add_argument('--rl_stage_steps', type=str, default='',
+                        help='Comma-separated PPO timesteps for each rl_stage_unrolls entry.')
+    parser.add_argument('--rl_eval_freq', type=int, default=0,
+                        help='Real-environment evaluation frequency during PPO training, in timesteps. 0 disables it.')
+    parser.add_argument('--rl_eval_episodes', type=int, default=20,
+                        help='Number of real-environment episodes per PPO evaluation.')
+    parser.add_argument('--rl_eval_max_episode_steps', type=int, default=500,
+                        help='Max episode length for periodic real-environment PPO evaluation.')
+    parser.add_argument('--ppo_n_steps', type=int, default=2048,
+                        help='SB3 PPO n_steps per env per rollout. Larger = bigger GPU batch.')
+    parser.add_argument('--dyna', action='store_true',
+                        help='Dyna-style training: mix real and imagined environments.')
+    parser.add_argument('--n_real_envs', type=int, default=4,
+                        help='Number of real environments in Dyna mode.')
+    parser.add_argument('--n_imagined_envs', type=int, default=8,
+                        help='Number of imagined environments in Dyna mode.')
+    parser.add_argument('--dyna_horizon', type=int, default=3,
+                        help='Max imagined episode length in Dyna mode (should be within reliable OL zone).')
+    parser.add_argument('--rl_finetune_steps', type=int, default=0,
+                        help='Additional real-env PPO finetuning steps after imagined/Dyna training.')
     parser.add_argument('--exact_comp', action='store_true')
     parser.add_argument('--log_state_reprs', action='store_true')
     parser.add_argument('--tags', nargs='*', default=None)
@@ -313,6 +339,12 @@ def make_argparser(parser=None):
     parser.add_argument('--log_norms', action='store_true')  # Log trans model norm data
     parser.add_argument('--ae_grad_clip', type=float, default=0)
     parser.add_argument('--e2e_loss', action='store_true')
+    parser.add_argument('--trans_reward_overestimate_coef', type=float, default=0.0,
+                        help='Penalty weight for reward overestimation in transition training.')
+    parser.add_argument('--trans_reward_zero_target_coef', type=float, default=0.0,
+                        help='Extra penalty weight for positive reward predictions on zero-reward targets.')
+    parser.add_argument('--trans_reward_zero_margin', type=float, default=0.0,
+                        help='Allowed positive reward margin before zero-target penalty activates.')
 
     # Add observation resize arguments
     parser.add_argument('--obs_resize', type=int, nargs=2, default=None,
@@ -502,7 +534,11 @@ def train_loop(model, trainer, train_loader, valid_loader=None, n_epochs=1,
                               unit="batch", leave=True)
 
         for i, batch_data in enumerate(epoch_iterator):
-            train_loss, aux_data = trainer.train(batch_data)
+            train_result = trainer.train(batch_data)
+            if isinstance(train_result, tuple) and len(train_result) == 2:
+                train_loss, aux_data = train_result
+            else:
+                train_loss, aux_data = train_result, None
 
             if not isinstance(train_loss, dict):
                 train_loss = {'loss': train_loss}

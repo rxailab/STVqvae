@@ -88,10 +88,19 @@ class ObsTransforms:
 
     def __init__(self, obs_mean=None, obs_std=None):
         if obs_mean is not None and obs_std is not None:
+            # Guard against invalid normalization stats coming from buffer attrs.
+            # Replace non-finite means with 0 and non-finite / tiny std with 1.
+            obs_mean = torch.nan_to_num(obs_mean, nan=0.0, posinf=0.0, neginf=0.0)
+            obs_std = torch.nan_to_num(obs_std, nan=1.0, posinf=1.0, neginf=1.0)
+            obs_std = torch.clamp(obs_std, min=1e-6)
+
             self.flat_obs_mean = obs_mean
-            self.obs_mean = obs_mean.unsqueeze(0) if len(obs_mean.shape) > 0 else obs_mean
             self.flat_obs_std = obs_std
-            self.obs_std = obs_std.unsqueeze(0) if len(obs_std.shape) > 0 else obs_std
+            # Keep channel-first stats in their native shape (e.g. CxHxW).
+            # Broadcasting then works for both single samples (CxHxW) and batches (BxCxHxW)
+            # without introducing an extra leading singleton dimension.
+            self.obs_mean = obs_mean
+            self.obs_std = obs_std
             self.has_normalization = True
         else:
             self.flat_obs_mean = None
@@ -326,6 +335,19 @@ class ReplayDataset(Dataset):
         """
         Fixed version that handles all numpy array conversion issues
         """
+        if self.preload:
+            obs = self.obs_transforms.obs_transform(self.data_buffer['obs'][idx])
+            action = self.data_buffer['action'][idx]
+            next_obs = self.obs_transforms.obs_transform(self.data_buffer['next_obs'][idx])
+            reward = self.data_buffer['reward'][idx].float()
+            done = self.data_buffer['done'][idx].float()
+            extra_data = [self.data_buffer[key][idx] for key in self.extra_keys]
+
+            transition_set = [obs, action, next_obs, reward, done, *extra_data]
+            if self.transform:
+                transition_set = self.transform(*transition_set)
+            return transition_set
+
         with h5py.File(self.replay_buffer_path, 'r') as buffer:
             # Ensure idx is an integer
             if isinstance(idx, (np.bool_, bool, np.integer)):

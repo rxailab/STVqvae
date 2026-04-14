@@ -434,21 +434,35 @@ def train(args, encoder_model=None):
                 next_obs = torch.from_numpy(next_obs_np).float()
 
                 # Capture semantic grid (object type per cell) for current obs.
-                # Must be done BEFORE vec_env.step() since step may auto-reset envs.
+                # For MiniGrid: extract from grid.encode() (available any time).
+                # For Crafter: use _sem_view() or last_semantic from wrapper.
                 if use_semantic_aux:
                     _n_lat_side = int(np.round(np.sqrt(getattr(ae_model, 'n_latent_embeds', 81))))
                     _sem_batch = []
+                    _is_crafter = 'crafter' in args.env_name.lower()
                     for _sub_env in vec_env.envs:
                         _ug = _sub_env.unwrapped
-                        _ge = _ug.grid.encode()[:, :, 0].copy()  # (width, height) col-major
-                        _ge[_ug.agent_pos[0], _ug.agent_pos[1]] = OBJECT_TO_IDX['agent']
-                        _ge_rowmajor = _ge.T  # (height, width) row-major = image layout
+                        if _is_crafter:
+                            # Crafter: get 64×64 semantic map directly
+                            if hasattr(_ug, 'get_semantic'):
+                                _sem_map = _ug.get_semantic()
+                            elif hasattr(_ug, '_sem_view'):
+                                _sem_map = _ug._sem_view()
+                            elif hasattr(_ug, 'last_semantic') and _ug.last_semantic is not None:
+                                _sem_map = _ug.last_semantic
+                            else:
+                                _sem_map = np.zeros((_n_lat_side, _n_lat_side), dtype=np.uint8)
+                            _ge_rowmajor = _sem_map  # already (H, W) row-major
+                        else:
+                            # MiniGrid: grid.encode() is (width, height, 3) col-major
+                            _ge = _ug.grid.encode()[:, :, 0].copy()
+                            _ge[_ug.agent_pos[0], _ug.agent_pos[1]] = OBJECT_TO_IDX['agent']
+                            _ge_rowmajor = _ge.T  # (height, width) row-major
                         if _ge_rowmajor.shape != (_n_lat_side, _n_lat_side):
-                            # Resize to match latent grid (nearest-neighbour)
                             from PIL import Image as _PIL_Image
                             _ge_rowmajor = np.array(
                                 _PIL_Image.fromarray(_ge_rowmajor.astype(np.uint8)).resize(
-                                    (_n_lat_side, _n_lat_side), resample=0),  # NEAREST=0
+                                    (_n_lat_side, _n_lat_side), resample=0),
                                 dtype=np.int64)
                         _sem_batch.append(_ge_rowmajor.flatten())
                     sem_grids_list.append(

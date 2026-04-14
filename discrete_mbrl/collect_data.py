@@ -19,9 +19,12 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
 from env_helpers import *
+from model_construction import construct_ae_model
 from shared.models import SB3GeneralEncoder, SB3ActorCriticPolicy
+from shared.models import mlp
 from training_helpers import vec_env_random_walk, vec_env_ez_explore
 from tqdm import tqdm
+from model_free.rl_utils import interpret_layer_sizes
 
 
 parser = argparse.ArgumentParser()
@@ -31,7 +34,7 @@ parser.add_argument('-n', '--n_envs', type=int, default=8)
 parser.add_argument('-s', '--train_steps', type=int, default=int(3e5))
 parser.add_argument('-c', '--chunk_size', type=int, default=2048)
 parser.add_argument('-ct', '--compression_type', type=str, default='lzf')
-# ppo, ppo_entropy, ppo_rollout, random, ezexplore, bfs
+# ppo, ppo_entropy, ppo_rollout, model_free_rollout, random, ezexplore, bfs
 parser.add_argument('-a', '--algorithm', type=str, default='random')
 parser.add_argument('--extra_info', nargs='*', default=[])
 parser.add_argument('--norm_stats', action='store_true')
@@ -50,6 +53,18 @@ parser.add_argument('--save_sb3_path', type=str, default=None,
                     help='Where to save an SB3 PPO model (e.g., ./sb3_agent.zip)')
 parser.add_argument('--load_sb3_path', type=str, default=None,
                     help='Where to load an SB3 PPO model (e.g., ./sb3_agent.zip)')
+parser.add_argument('--load_model_free_path', type=str, default=None,
+                    help='Path to a saved custom model_free checkpoint (.pt) for rollout collection')
+parser.add_argument('--deterministic', action='store_true',
+                    help='Use deterministic actions when rolling out a loaded policy')
+parser.add_argument('--ae_model_type', type=str, default='vqvae')
+parser.add_argument('--ae_model_version', type=str, default='2')
+parser.add_argument('--ae_model_hash', type=str, default=None)
+parser.add_argument('--codebook_size', type=int, default=64)
+parser.add_argument('--embedding_dim', type=int, default=64)
+parser.add_argument('--filter_size', type=int, default=9)
+parser.add_argument('--latent_dim', type=int, default=None)
+parser.add_argument('--device', type=str, default='cuda')
 
 
 def _split_step(step_result):
@@ -297,6 +312,46 @@ def bfs_policy_action(env_u):
     return forward
 
 
+def _split_reset(reset_result):
+    if isinstance(reset_result, tuple):
+        return reset_result[0]
+    return reset_result
+
+
+def _strip_compile_prefix(state_dict):
+    return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
+
+def load_model_free_policy_from_checkpoint(model_path, encoder, args, device):
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    saved_args = checkpoint.get('args', {})
+
+    if args.ae_model_type == 'vqvae':
+        input_dim = args.embedding_dim * encoder.n_latent_embeds
+    else:
+        input_dim = encoder.latent_dim
+
+    env = make_env(args.env_name, max_steps=args.env_max_steps)
+    act_dim = env.action_space.n
+    env.close()
+
+    policy_hidden = interpret_layer_sizes(saved_args.get('policy_hidden', [256, 256]))
+    rl_activation = saved_args.get('rl_activation', 'relu')
+    vqvae_e2e = (saved_args.get('ae_model_type') == 'vqvae' and saved_args.get('e2e_loss', False))
+
+    mlp_kwargs = {
+        'activation': rl_activation,
+        'discrete_input': (args.ae_model_type == 'vqvae') and (not vqvae_e2e),
+    }
+    if args.ae_model_type == 'vqvae' and not vqvae_e2e:
+        mlp_kwargs['n_embeds'] = args.codebook_size
+        mlp_kwargs['embed_dim'] = args.embedding_dim
+
+    policy = mlp([input_dim] + policy_hidden + [act_dim], **mlp_kwargs)
+    policy.load_state_dict(_strip_compile_prefix(checkpoint['policy_state_dict']))
+    return policy.to(device).eval()
+
+
 # =========================
 # Main
 # =========================
@@ -377,6 +432,64 @@ if __name__ == '__main__':
         pbar.close()
         print("Buffer full; rollout collection done.")
 
+    # ---- Option A (rollout-only): custom model_free checkpoint
+    elif algo == 'model_free_rollout':
+        assert args.load_model_free_path is not None, "Need --load_model_free_path for model_free_rollout"
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        ckpt = torch.load(args.load_model_free_path, map_location='cpu', weights_only=False)
+        ckpt_args = ckpt.get('args', {})
+        for key, value in ckpt_args.items():
+            if not hasattr(args, key):
+                setattr(args, key, value)
+        args.ae_model_type = ckpt_args.get('ae_model_type', args.ae_model_type)
+        args.ae_model_version = ckpt_args.get('ae_model_version', args.ae_model_version)
+        args.codebook_size = ckpt_args.get('codebook_size', args.codebook_size)
+        args.embedding_dim = ckpt_args.get('embedding_dim', args.embedding_dim)
+        args.filter_size = ckpt_args.get('filter_size', args.filter_size)
+        args.latent_dim = ckpt_args.get('latent_dim', args.latent_dim)
+        args.wandb = False
+        args.comet_ml = False
+        args.model_dir = '.'
+        args.ae_grad_clip = getattr(args, 'ae_grad_clip', 0.0)
+        sample_env = make_env(args.env_name, max_steps=args.env_max_steps)
+        sample_obs = preprocess_obs([_split_reset(sample_env.reset())])
+        encoder = construct_ae_model(sample_obs.shape[1:], args, load=False)[0]
+        encoder.load_state_dict(ckpt['ae_model_state_dict'])
+        encoder = encoder.to(device)
+        for p in encoder.parameters():
+            p.requires_grad = False
+        encoder.eval()
+        policy = load_model_free_policy_from_checkpoint(args.load_model_free_path, encoder, args, device)
+        sample_env.close()
+
+        obs = venv.reset()
+        pbar = tqdm(total=int(replay_buffer['obs'].shape[0]), desc="Collecting (model_free_rollout)")
+        last_n = 0
+
+        while not buffer_full(replay_buffer, buffer_lock):
+            obs_tensor = preprocess_obs(obs).to(device)
+            with torch.no_grad():
+                states = encoder.encode(obs_tensor, return_one_hot=True)
+                logits = policy(states)
+                if args.deterministic:
+                    action = logits.argmax(dim=-1).cpu().numpy()
+                else:
+                    action = torch.distributions.Categorical(logits=logits).sample().cpu().numpy()
+
+            obs, rewards, dones, infos = venv.step(action)
+            if np.any(dones):
+                obs = venv.reset()
+
+            with buffer_lock:
+                n = int(replay_buffer.attrs['data_idx'])
+            if n > last_n:
+                pbar.update(n - last_n)
+                last_n = n
+
+        pbar.close()
+        print("Buffer full; model_free rollout collection done.")
+
     # ---- Option B: BFS scripted solver (expert trajectories)
     elif algo == 'bfs':
         obs = venv.reset()
@@ -439,7 +552,11 @@ if __name__ == '__main__':
         obs_mean = obs_sum / max(obs_count, 1)
         # unbiased std, guard obs_count==1
         if obs_count > 1:
-            obs_std = np.sqrt((obs_count * obs_square_sum - np.square(obs_sum)) / (obs_count * (obs_count - 1)))
+            var_num = (obs_count * obs_square_sum - np.square(obs_sum))
+            var_den = (obs_count * (obs_count - 1))
+            # Numerical guard: variance can go slightly negative from fp rounding.
+            obs_var = np.maximum(var_num / max(var_den, 1), 1e-12)
+            obs_std = np.sqrt(obs_var)
         else:
             obs_std = np.ones_like(obs_mean)
 

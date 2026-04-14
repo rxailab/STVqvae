@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+RUN_DIR="${RUN_DIR:-$PROJECT_ROOT/wm_runs/vae_wm_rl_v11_conservative_reward_longshort}"
+DEFAULT_LOCAL_PYTHON="$PROJECT_ROOT/../miniforge3/envs/stvqvae/bin/python"
+DEVICE="${DEVICE:-cuda}"
+RL_EVAL_FREQ="${RL_EVAL_FREQ:-20480}"
+RL_EVAL_EPISODES="${RL_EVAL_EPISODES:-20}"
+REWARD_OVERESTIMATE_COEF="${REWARD_OVERESTIMATE_COEF:-2.0}"
+REWARD_ZERO_TARGET_COEF="${REWARD_ZERO_TARGET_COEF:-4.0}"
+REWARD_ZERO_MARGIN="${REWARD_ZERO_MARGIN:-0.0}"
+
+pick_python() {
+  local candidates=()
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    candidates+=("$PYTHON_BIN")
+  fi
+
+  candidates+=(
+    "$DEFAULT_LOCAL_PYTHON"
+    "/storage/hpc/11/xiar3/vit5/bin/python"
+    "/opt/miniconda3/envs/vit5/bin/python"
+    "/home/xiar3/miniconda3/envs/vit5/bin/python"
+    "/home/xiar3/.conda/envs/vit5/bin/python"
+    "python3"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ "$candidate" == "python3" ]]; then
+      if command -v python3 >/dev/null 2>&1 && python3 -c "import torch" >/dev/null 2>&1; then
+        printf '%s\n' "python3"
+        return 0
+      fi
+      continue
+    fi
+
+    if [[ -x "$candidate" ]] && "$candidate" -c "import torch" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+PYTHON_BIN="$(pick_python || true)"
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  cat >&2 <<'EOF'
+Could not find a Python interpreter with torch.
+Set PYTHON_BIN to the correct interpreter and rerun.
+EOF
+  exit 1
+fi
+
+mkdir -p "$RUN_DIR"
+mkdir -p "$PROJECT_ROOT/.mplconfig"
+
+echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Starting v11_conservative_reward_longshort"
+echo "RUN_DIR=$RUN_DIR"
+echo "PYTHON_BIN=$PYTHON_BIN"
+echo "DEVICE=$DEVICE RL_EVAL_FREQ=$RL_EVAL_FREQ RL_EVAL_EPISODES=$RL_EVAL_EPISODES"
+echo "REWARD_OVERESTIMATE_COEF=$REWARD_OVERESTIMATE_COEF"
+echo "REWARD_ZERO_TARGET_COEF=$REWARD_ZERO_TARGET_COEF"
+echo "REWARD_ZERO_MARGIN=$REWARD_ZERO_MARGIN"
+
+cd "$PROJECT_ROOT/discrete_mbrl"
+export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+export TORCHDYNAMO_DISABLE=1
+export MPLCONFIGDIR="$PROJECT_ROOT/.mplconfig"
+
+exec "$PYTHON_BIN" -u full_train_eval.py \
+  --env_name MiniGrid-LavaCrossingS9N1-v0 \
+  --model_dir "$RUN_DIR" \
+  --ae_model_type vae \
+  --ae_model_version 2 \
+  --trans_model_type continuous \
+  --trans_model_version 1 \
+  --latent_dim 128 \
+  --filter_size 9 \
+  --epochs 20 \
+  --trans_epochs 80 \
+  --trans_hidden 512 \
+  --trans_depth 5 \
+  --trans_reward_overestimate_coef "$REWARD_OVERESTIMATE_COEF" \
+  --trans_reward_zero_target_coef "$REWARD_ZERO_TARGET_COEF" \
+  --trans_reward_zero_margin "$REWARD_ZERO_MARGIN" \
+  --batch_size 1024 \
+  --eval_batch_size 128 \
+  --n_preload 0 \
+  --no_load \
+  --n_train_unroll 12 \
+  --rl_unroll_steps 16 \
+  --rl_stage_unrolls 8,8,12,16 \
+  --rl_stage_steps 200000,200000,100000,100000 \
+  --rl_train_steps 600000 \
+  --rl_eval_freq "$RL_EVAL_FREQ" \
+  --rl_eval_episodes "$RL_EVAL_EPISODES" \
+  --rl_eval_max_episode_steps 500 \
+  --device "$DEVICE" \
+  --save

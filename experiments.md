@@ -2470,4 +2470,61 @@ With a frozen encoder (e2esnapback Phase 3), the policy trained for only 840k st
 | 35 | mf_e2e_semantic_doorkey | RTX 4090 (local) | Done | **0.9988** | **0.9943** | **DoorKey + SemanticHeadV2**: pos encoding + 3×3 local conv + focal loss (γ=2) + coef 0.05. RL matched baseline but probe WORSE (58.4% vs 62.4%). Bottleneck is encoder, not head. |
 | 36 | mf_e2e_semantic_doorkey_v5enc | RTX 4090 (local) | Done | **0.9988** | **0.9984** | **BREAKTHROUGH — Strided encoder v5**: no AdaptiveAvgPool2d, 8×8=64 tokens (1:1 grid alignment). Probe 82.9% (was 58–63%). Key 100%, door 94%, agent 100%, wall 97%. Goal still 0%. |
 | 37 | mf_e2e_semantic_doorkey_v5enc_prevq | RTX 4090 (local) | Done | **0.9988** | **0.9982** | **Pre-VQ semantic loss** + codebook 256. Probe 83.5% (marginal +1.4%). Goal still 0% — loss signal alone cannot force encoder to separate goal. |
-| 38 | mf_e2e_semantic_doorkey_v6enc_goal | RTX 4090 (local) | Pending | — | — | **Color+coord encoder v6** + immediate pre-VQ semantic loss. Targets the remaining goal=0% failure by preserving per-cell RGB and positional cues before quantization. |
+| 38 | mf_e2e_semantic_doorkey_v6enc_goal | RTX 4090 (local) | Done ✅ | **0.9988** | **0.9528** | **BREAKTHROUGH — Goal 0%→98.8%!** Color+coord v6 encoder. Probe: 91.1% overall (wall 99%, key 100%, door 99%, goal 98.8%, agent 100%). RGB shortcut provides per-tile color that VQ can't wash out. |
+| 39 | mf_e2e_semantic_doorkey_v7enc_multiscale | RTX 4090 (local) | Done ✅ | **0.9988** | **0.9984** | **v7 multi-scale+SE encoder**: goal retained (94%) but wall collapsed (96→78%). Multi-scale skips hurt trunk. Overall 78.3%. |
+| 40 | mf_e2e_semantic_doorkey_v8enc_gated | RTX 4090 (local) | Done ✅ | **0.9988** | **0.9972** | **v8 gated input skip**: goal retained (95%) but empty/wall collapsed. Gating couldn't selectively help goal without hurting trunk. Overall 71.0%. |
+| 41 | mf_e2e_semantic_doorkey_v9enc_patch | RTX 4090 (local) | Done ✅ | **0.9988** | **0.9981** | **v9 ViT-style patch embedding**: goal returned to 0%! Disproved receptive-field contamination hypothesis. Problem is VQ codebook allocation, not architecture. Overall 78.0%. |
+| 42 | mf_e2e_semantic_doorkey16_v6enc_restart | RTX 4090 (local) | Done ✅ | **0.9988** | **0.2716** | **DoorKey-16x16 scaling test**: v6 encoder + VQ dead-code restart (codebook 512, 256 tokens). Goal partially preserved (51.7%) but wall collapsed (20%). Harder env needs more capacity. |
+| 43 | mf_e2e_semantic_crafter_v6enc | RTX 4090 (local) | Pending | — | — | **Crafter (non-MiniGrid)**: v6 encoder on 64×64 Crafter obs, 19 semantic classes, codebook 512, 8M steps. Tests generalization of color-coord shortcut to 2D survival game. |
+
+---
+
+## Conclusion
+
+### What was solved
+
+The core goal — a VQVAE encoder trained end-to-end with PPO that achieves near-optimal policy performance — is solved. The best recipe (established by experiments 9, 12, 29):
+
+1. **Pretrain VQVAE on reconstruction** from random-policy data to give the encoder a good starting point.
+2. **Fine-tune e2e with conservative encoder LR** (`encoder_lr = 1e-5`, 10× lower than policy LR).
+3. **Cosine anneal the encoder LR** to zero, preventing late-training drift without capping the peak.
+4. **Snapback safety valve**: save the best encoder state; if rolling reward drops > 50% from peak, restore and hard-freeze. Prevents total collapse if drift eventually occurs.
+5. **Correct vectorized rollout** (`batch_size = num_envs × ≥256` for sufficient per-env trajectory length, env-major GAE ordering to prevent cross-env contamination).
+
+This recipe reliably reaches **0.9984–0.9988 final reward** on MiniGrid-LavaCrossing and MiniGrid-DoorKey-8x8 within 5–10M steps, with no collapse.
+
+### What was not solved: world-model transfer
+
+Experiments 13–27 represent a systematic attempt to train a latent world model and transfer the learned policy to the real environment. Every approach failed (0.000 real-env transfer) until Dyna-style real-env grounding was added — and even Dyna produced negative transfer. The root causes:
+
+- **Reward hallucination**: continuous world models develop compounding reward optimism along imagined rollouts. PPO optimizes the imagined objective, not the real one.
+- **Transition compounding error**: discrete VQVAE transition models are accurate teacher-forced at 1-step but diverge rapidly open-loop (97.9% accuracy at 3 steps → catastrophic at 10+).
+- **Off-policy distribution mismatch**: transition models trained on replay data don't generalise to the states the learned policy visits.
+
+No architectural improvement (BFS data, shorter horizons, curriculum, Dyna, stronger transitions) resolved these issues. The world-model line is a dead end without a fundamentally different approach (e.g., MBPO-style real-data interleaving, Dreamer-style RSSM, or online transition model updating).
+
+### What was learned about encoder semantic grounding (experiments 33–42)
+
+The spatial structure of the VQVAE encoder critically determines what information the codebook preserves:
+
+| Encoder variant | Key property | Overall probe |
+|---|---|---|
+| v2 (`AdaptiveAvgPool2d(9×9)`) | Upsamples 5×5→9×9, blurs cell boundaries | 56–63% |
+| v5 (strided conv, 8×8) | 1:1 cell alignment, no pooling | 82–83% |
+| v6 (strided + pooled RGB + coords) | Explicit per-cell color shortcut | **88–91%** |
+| v7 (multi-scale skips + SE) | Over-engineered; hurt trunk features | 78% |
+| v8 (gated input skip) | Gate changes trunk gradient flow | 71% |
+| v9 (ViT-style patch embed) | Independent per-tile; VQ still collapses rare codes | 78% |
+
+**Key findings:**
+- `AdaptiveAvgPool2d` with upsampling destroys spatial boundaries — replacing it with strided convolutions at the natural output resolution is a prerequisite for semantic grounding.
+- Goal (1.6% of tokens) is the hardest class. It requires the encoder to produce geometrically distant pre-VQ features so the VQ codebook is forced to allocate a separate code. This was achieved only with an explicit per-tile pooled-RGB shortcut (v6).
+- The VQ layer is a hard bottleneck for rare classes: even if the encoder produces distinct features, majority-class codes dominate EMA updates and rare classes get absorbed. VQ dead-code restart partially mitigates this but is not a full solution.
+- Adding auxiliary losses (world model, semantic) is neutral-to-slight-positive on RL performance when coefficients are kept small (`≤0.1`). Large coefficients (> 0.05 on semantic) destabilise the encoder.
+
+### Open directions
+
+1. **Semantic grounding for all classes**: v6 solves goal but regresses on door/key vs v5. A combined architecture preserving v5's full-width trunk while adding the RGB shortcut selectively (not globally fused) may recover all classes simultaneously.
+2. **DoorKey-16x16**: Experiment 42 showed the v6+restart approach partially transfers to a harder environment (goal 51.7%) but degrades wall badly (20%). Encoder capacity needs to scale with grid size.
+3. **World model**: The discrete VQVAE + MLP transition architecture hit a ceiling. Sequence-model-based transitions (Transformer, RSSM) operating directly on codebook indices might improve multi-step fidelity. Alternatively, MBPO-style interleaving of real and imagined rollouts (rather than pure imagination) would eliminate the reward hallucination problem entirely.
+4. **Crafter generalization** (exp 43, pending): Test whether the v6 color+coord encoder and semantic aux pipeline transfers to a non-grid-world visual environment with 19 semantic classes.

@@ -307,6 +307,59 @@ class SqueezeDimWrapper(gym.ObservationWrapper):
         return observation.squeeze(self.dim)
 
 
+class CrafterGymnasiumWrapper(gym.Env):
+    """Wrap native crafter.Env (old Gym 4-tuple API) as a Gymnasium env.
+
+    Also stores the latest ``info['semantic']`` (64×64 uint8 semantic map)
+    on the wrapper so it can be retrieved during rollout for the semantic
+    auxiliary loss.
+    """
+
+    metadata = {"render_modes": ["rgb_array"]}
+
+    def __init__(self, crafter_env):
+        super().__init__()
+        self._env = crafter_env
+        # crafter.Env has .observation_space and .action_space from old gym
+        self.observation_space = gym.spaces.Box(
+            low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
+        self.action_space = gym.spaces.Discrete(
+            crafter_env.action_space.n if hasattr(crafter_env, 'action_space')
+            else 17)
+        self.last_semantic = None  # (64, 64) uint8
+
+    def reset(self, *, seed=None, options=None):
+        obs = self._env.reset()
+        # Capture initial semantic map
+        if hasattr(self._env, '_sem_view'):
+            self.last_semantic = self._env._sem_view()
+        else:
+            self.last_semantic = None
+        return obs, {}
+
+    def step(self, action):
+        obs, reward, done, info = self._env.step(action)
+        self.last_semantic = info.get('semantic', None)
+        # Gymnasium 5-tuple: terminated, truncated
+        return obs, reward, done, False, info
+
+    def get_semantic(self):
+        """Get current semantic map (64×64 uint8). Available before and after step."""
+        if hasattr(self._env, '_sem_view'):
+            return self._env._sem_view()
+        return self.last_semantic
+
+    def render(self):
+        return None
+
+    def close(self):
+        return self._env.close() if hasattr(self._env, 'close') else None
+
+    @property
+    def unwrapped(self):
+        return self
+
+
 class MiniGridSimpleStochActionWrapper(Wrapper):
     def __init__(self, env, n_acts=None, stoch_probs=None):
         super().__init__(env)
@@ -1058,12 +1111,12 @@ def make_env(env_name, replay_buffer=None, buffer_lock=None, extra_info=None,
     # Crafter
     # ------------------------------------------------------------------
     elif 'crafter' in env_name.lower():
-        import crafter
+        import crafter as _crafter_mod
         wrappers = [
+            CrafterGymnasiumWrapper,
             Custom2DWrapper,
-            # lambda env: TransformObservation(env, torch.FloatTensor),
         ]
-        env = gym.make(env_name)
+        env = _crafter_mod.Env()  # native crafter env (old gym API, 64x64x3)
 
     # ------------------------------------------------------------------
     # MuJoCo (state-based)
