@@ -267,7 +267,8 @@ class IdentityModel(nn.Module):
 
 # Source: https://github.com/zalandoresearch/pytorch-vq-vae/blob/master/vq-vae.ipynb
 class VectorQuantizerEMA(nn.Module):
-    def __init__(self, n_embeddings, embedding_dim, commitment_cost, decay, epsilon=1e-5):
+    def __init__(self, n_embeddings, embedding_dim, commitment_cost, decay,
+                 epsilon=1e-5, dead_code_threshold=0.0):
         super(VectorQuantizerEMA, self).__init__()
 
         self._embedding_dim = embedding_dim
@@ -284,6 +285,7 @@ class VectorQuantizerEMA(nn.Module):
 
         self._decay = decay
         self._epsilon = epsilon
+        self._dead_code_threshold = dead_code_threshold
 
     def quantized_decode(self, oh_encodings):
       """Decodes from one-hot encodings.
@@ -400,6 +402,22 @@ class VectorQuantizerEMA(nn.Module):
           dw = torch.matmul(flat_oh_encodings.detach().t(), flat_input)
           self._ema_w = nn.Parameter(self._ema_w * self._decay + (1 - self._decay) * dw)
 
+          # ── Dead-code restart ──────────────────────────────────────
+          # Codes whose EMA usage is near zero are effectively dead.
+          # Replace them with randomly sampled encoder outputs so they
+          # can be reclaimed by under-represented input clusters.
+          # This prevents codebook collapse in diverse environments.
+          if self._dead_code_threshold > 0:
+              with torch.no_grad():
+                  dead_mask = self._ema_cluster_size.data < self._dead_code_threshold
+                  n_dead = dead_mask.sum().item()
+                  if n_dead > 0 and flat_input.shape[0] > 0:
+                      rand_idx = torch.randint(0, flat_input.shape[0], (n_dead,),
+                                               device=flat_input.device)
+                      new_vectors = flat_input[rand_idx].detach()
+                      self._ema_w.data[dead_mask] = new_vectors
+                      self._ema_cluster_size.data[dead_mask] = 1.0
+
           self._embedding.weight = nn.Parameter(self._ema_w / self._ema_cluster_size.unsqueeze(1))
 
       # Loss
@@ -421,6 +439,7 @@ class VQVAEModel(nn.Module):
   def __init__(self, obs_dim, codebook_size, embedding_dim, encoder=None,
                decoder=None, n_latents=None, quantized_enc=False, sparsity=0.0,
                sparsity_type='random', commitment_cost=0.25, ema_decay=0.99,
+               dead_code_threshold=0.0,
                # -------------------------
                # [NEW] Optional context-conditioning for better recon w/ same codes
                # Keep defaults False so old checkpoints load identically.
@@ -447,7 +466,8 @@ class VQVAEModel(nn.Module):
     self.encoder = encoder or create_encoder(obs_dim)
     self.quantizer = VectorQuantizerEMA(
       codebook_size, embedding_dim,
-      commitment_cost=commitment_cost, decay=ema_decay)
+      commitment_cost=commitment_cost, decay=ema_decay,
+      dead_code_threshold=dead_code_threshold)
     self.decoder = decoder or create_decoder(obs_dim)
 
     # Infer encoder output shape

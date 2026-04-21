@@ -1,0 +1,56 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: model_free/models/crafter/mf_e2e_semantic_crafter_v6enc_cal_best_model.pt
+Constructed VQVAE with 64 latents and 1024 codebook entries
+Grid: 8x8=64 | embed_dim=64
+sem_pre_vq = True
+  2000/10000 frames
+  4000/10000 frames
+  6000/10000 frames
+  8000/10000 frames
+  10000/10000 frames
+
+=== Trained Semantic Head Evaluation ===
+Frames: 10000 | Valid tokens: 640,000
+sem_pre_vq: True
+
+Overall accuracy: 35.7%
+  Class               N     Acc   Pred%
+  --------------------------------------
+  water          135570   24.3%   19.4% ✓
+  grass          269287   72.4%   71.1% ✓
+  stone           89433    0.3%    0.2%
+  path            54243    0.5%    0.4%
+  sand            37054    0.0%    0.1%
+  tree            29683    0.0%    0.0%
+  lava             6643    0.4%    1.2%
+  coal             7945    0.0%    0.0%
+  iron             2962    0.0%    0.0%
+  diamond           153    0.0%    0.2%
+  plant             175   33.1%    0.4% ✓
+  fence            4123    0.0%    0.9%
+  player            887    7.0%    1.8%
+  cow              1829    0.2%    3.4%
+  zombie             13    0.0%    0.1%
+
+  → Classes >10% accuracy: 3/15
+
+Prediction distribution (what does the head actually predict?):
+  class  2 (grass     ):  454857 (71.1%)
+  class  1 (water     ):  124005 (19.4%)
+  class 16 (cow       ):   21793 (3.4%)
+  class 15 (player    ):   11820 (1.8%)
+  class  7 (lava      ):    7854 (1.2%)
+  class 14 (fence     ):    5457 (0.9%)
+  class 11 (?         ):    4448 (0.7%)
+  class 13 (plant     ):    2762 (0.4%)
+  class  4 (path      ):    2617 (0.4%)
+  class  3 (stone     ):    1326 (0.2%)
+
+============================================
+SUMMARY: Trained sem_head accuracy = 35.7%
+         Classes with >10% acc     = 3/15

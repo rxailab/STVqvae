@@ -369,6 +369,8 @@ def add_model_args(parser):
     parser.add_argument('--latent_dim', type=int, default=None)
     parser.add_argument('--filter_size', type=int, default=8)
     parser.add_argument('--codebook_size', type=int, default=16)
+    parser.add_argument('--dead_code_threshold', type=float, default=0.0,
+                        help='EMA usage below this triggers dead-code restart (0=disabled)')
     parser.add_argument('--ae_model_hash', type=str, default=None)
 
     parser.add_argument('--trans_hidden', type=int, default=256)

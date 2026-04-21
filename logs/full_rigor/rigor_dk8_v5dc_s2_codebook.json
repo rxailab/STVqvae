@@ -1,0 +1,29 @@
+{
+  "n_dead": 0,
+  "n_active": 64,
+  "codebook_size": 64,
+  "dead_fraction": 0.0,
+  "avg_purity": 0.8832329868150144,
+  "class_code_count": {
+    "4": 3,
+    "1": 41,
+    "10": 7,
+    "2": 11,
+    "5": 2
+  },
+  "h_class_given_code": 0.47183450458961035,
+  "h_code_given_class": 3.3132913886584165,
+  "h_code": 4.2264178183137355,
+  "all_classes": [
+    1,
+    2,
+    4,
+    5,
+    8,
+    10
+  ],
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/rigor_dk8_v5dc_s2_best_model.pt",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "embedding_dim": 64,
+  "ae_model_version": "5"
+}

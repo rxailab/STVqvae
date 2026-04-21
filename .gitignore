@@ -1,8 +1,8 @@
-# Logs
+# Subprocess / build outputs
 *.out
 *.err
 
-# Model checkpoints
+# Model checkpoints (too large for git)
 models/
 *.pt
 *.pth
@@ -22,9 +22,6 @@ build/
 
 # Data
 *.hdf5
-*.png
-*.jpg
-*.gif
 
 # IDE / Claude
 .idea/
@@ -35,4 +32,8 @@ build/
 
 # Env
 .env
-logs/
+
+# Logs — include results JSONs, CSVs, and summary logs; exclude noise
+logs/dashboard.log
+logs/*.png
+.mplconfig/

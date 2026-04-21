@@ -1,0 +1,24 @@
+{
+  "env_name": "MiniGrid-LavaCrossingS9N1-v0",
+  "model_dir": "/home/xiar3/experiments/STVqvae/wm_runs/encoder_localctx_vqvae_v1",
+  "ae_model_type": "local_ctx_vqvae",
+  "ae_model_version": "2",
+  "ae_model_hash": "f5d4066ca69fb330eba42c0fe19eeb0d",
+  "test_metrics": {
+    "quantizer_loss": 11.409866988658905,
+    "recon_loss": 2683.7921142578125
+  },
+  "test_stats": {
+    "dbg_mse_agent": 0.01658117468468845,
+    "dbg_mse_bg": 0.0029946961149107665,
+    "dbg_agent_frac": 0.05092592560686171,
+    "codebook_active_codes": 4.0,
+    "codebook_total_usage": 20250.0,
+    "codebook_max_usage": 8507.8125,
+    "codebook_min_usage": 0.0,
+    "codebook_usage_entropy": 1.2160551026463509,
+    "perplexity": 3.3738811314105988,
+    "soft_entropy": 1.2160551100969315
+  },
+  "n_test_batches": 16
+}

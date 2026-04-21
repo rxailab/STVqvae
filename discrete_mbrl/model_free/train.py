@@ -303,7 +303,13 @@ def train(args, encoder_model=None):
 
     if use_semantic_aux and args.e2e_loss:
         sem_head_version = getattr(args, 'sem_head_version', 1)
-        n_latent = getattr(ae_model, 'n_latent_embeds', 81)
+        if hasattr(ae_model, 'n_latent_embeds'):
+            n_latent = ae_model.n_latent_embeds
+        elif hasattr(ae_model, 'latent_dim'):
+            # Continuous VAE: latent_dim = embedding_dim * n_spatial_tokens
+            n_latent = ae_model.latent_dim // args.embedding_dim
+        else:
+            n_latent = 81  # legacy fallback
         if sem_head_version == 2:
             from shared.models.transition_models import SemanticHeadV2
             sem_head = SemanticHeadV2(
@@ -349,6 +355,7 @@ def train(args, encoder_model=None):
         sem_use_class_weights=getattr(args, 'sem_class_weights', True),
         sem_focal_gamma=getattr(args, 'sem_focal_gamma', 0.0),
         sem_pre_vq=getattr(args, 'sem_pre_vq', False),
+        sem_class_weight_power=getattr(args, 'sem_class_weight_power', 1.0),
     )
 
     replay_buffer = ReplayBuffer(args.replay_size) if args.ae_er_train else None
@@ -437,7 +444,13 @@ def train(args, encoder_model=None):
                 # For MiniGrid: extract from grid.encode() (available any time).
                 # For Crafter: use _sem_view() or last_semantic from wrapper.
                 if use_semantic_aux:
-                    _n_lat_side = int(np.round(np.sqrt(getattr(ae_model, 'n_latent_embeds', 81))))
+                    if hasattr(ae_model, 'n_latent_embeds'):
+                        _n_lat_embeds = ae_model.n_latent_embeds
+                    elif hasattr(ae_model, 'latent_dim'):
+                        _n_lat_embeds = ae_model.latent_dim // args.embedding_dim
+                    else:
+                        _n_lat_embeds = 81
+                    _n_lat_side = int(np.round(np.sqrt(_n_lat_embeds)))
                     _sem_batch = []
                     _is_crafter = 'crafter' in args.env_name.lower()
                     for _sub_env in vec_env.envs:
@@ -814,6 +827,18 @@ def train(args, encoder_model=None):
 if __name__ == '__main__':
     mf_arg_parser = make_mf_arg_parser()
     args = get_args(mf_arg_parser)
+
+    # ── Global seed for reproducibility ──
+    if getattr(args, 'seed', None) is not None:
+        import random
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        print(f'Global seed set to {args.seed}')
 
     if hasattr(args.env_change_freq, "isdecimal") and args.env_change_freq.isdecimal():
         args.env_change_freq = int(args.env_change_freq)

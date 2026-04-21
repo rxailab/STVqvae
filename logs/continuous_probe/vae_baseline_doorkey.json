@@ -1,0 +1,40 @@
+{
+  "model_path": "../discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/vae_baseline_doorkey_v6enc_best_model.pt",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "ae_model_type": "vae",
+  "ae_model_version": "6",
+  "n_frames": 30000,
+  "per_class": {
+    "empty": {
+      "acc": 0.8539378643302091,
+      "count": 815023,
+      "class_id": 1
+    },
+    "wall": {
+      "acc": 0.8606575757575757,
+      "count": 990000,
+      "class_id": 2
+    },
+    "door": {
+      "acc": 0.9787490378501389,
+      "count": 29881,
+      "class_id": 4
+    },
+    "key": {
+      "acc": 0.9849776856869621,
+      "count": 25096,
+      "class_id": 5
+    },
+    "goal": {
+      "acc": 1.0,
+      "count": 30000,
+      "class_id": 8
+    },
+    "agent": {
+      "acc": 0.9792666666666666,
+      "count": 30000,
+      "class_id": 10
+    }
+  },
+  "macro_mean_acc": 0.9429314717152587
+}

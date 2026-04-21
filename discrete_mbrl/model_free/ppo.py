@@ -75,7 +75,7 @@ class PPOTrainer():
       norm_advantages=False, max_grad_norm=0.5, e2e_loss=False,
       target_ae=None, trans_model=None, wm_aux_coef=0.0,
       sem_head=None, sem_aux_coef=0.0, sem_aux_start_reward=0.0, sem_use_class_weights=True,
-      sem_focal_gamma=0.0, sem_pre_vq=False,
+      sem_focal_gamma=0.0, sem_pre_vq=False, sem_class_weight_power=1.0,
     ):
     self.n_acts = env.action_space.n
     self.policy = policy
@@ -103,6 +103,7 @@ class PPOTrainer():
     self.sem_use_class_weights = sem_use_class_weights  # use inverse-freq weighting
     self.sem_focal_gamma = sem_focal_gamma  # focal loss gamma (0 = standard CE)
     self.sem_pre_vq = sem_pre_vq        # apply sem loss to pre-VQ encoder output (direct grad)
+    self.sem_class_weight_power = sem_class_weight_power  # 1.0=inv-freq, 0.5=sqrt, 0=none
     self.sem_class_weights = None       # computed lazily from first batch
     self.policy_losses = []
     self.critic_losses = []
@@ -319,11 +320,28 @@ class PPOTrainer():
                 flat_t = sem_targets.view(-1)
                 counts = torch.bincount(flat_t, minlength=n_cls).float().clamp(min=1)
                 inv_freq = counts.sum() / (n_cls * counts)
-                # Cap at 20× to prevent extreme weight on very rare classes
-                inv_freq = inv_freq.clamp(max=20.0)
+                # Apply power (1.0=full inv-freq, 0.5=sqrt — gentler for very imbalanced data)
+                inv_freq = inv_freq ** self.sem_class_weight_power
+                # Normalize over PRESENT classes only (count > 50) — absent classes
+                # would otherwise inflate the mean and crush all common-class weights.
+                present_mask = counts > 50
+                if present_mask.any():
+                    mean_present = inv_freq[present_mask].mean()
+                    inv_freq = inv_freq / mean_present
+                # Absent classes get weight 1.0 (neutral); present classes are normalized
+                inv_freq[~present_mask] = 1.0
+                # Cap to prevent extreme weight on very rare classes
+                inv_freq = inv_freq.clamp(max=10.0)
                 self.sem_class_weights = inv_freq.to(self.device)
-                print(f'[SEM_AUX] Class weights: '
-                      + ', '.join(f'{i}:{w:.1f}' for i, w in enumerate(inv_freq) if w < 19.5))
+                n_present = present_mask.sum().item()
+                print(f'[SEM_AUX] Class weights (power={self.sem_class_weight_power}, '
+                      f'{n_present}/{n_cls} classes present):')
+                for i, w in enumerate(inv_freq):
+                    if counts[i] > 1:
+                        print(f'  class {i:2d}: weight={w:.3f}  count={int(counts[i])}')
+                absent = [i for i in range(n_cls) if counts[i] <= 50]
+                if absent:
+                    print(f'  Absent classes (weight=1.0): {absent}')
 
             if self.sem_focal_gamma > 0:
                 sem_loss = focal_cross_entropy(

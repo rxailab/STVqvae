@@ -114,6 +114,13 @@ def make_mf_arg_parser():
                       help='Apply semantic loss to PRE-VQ encoder output (direct gradient, no STE). '
                            'Bypasses the quantization bottleneck so the encoder gets clean gradient '
                            'to separate visually similar classes (e.g., goal vs empty).')
+  parser.add_argument('--sem_class_weight_power', type=float, default=1.0,
+                      help='Power applied to inverse-frequency class weights (1.0=full inv-freq, '
+                           '0.5=sqrt/gentler). Reduces extreme penalization of rare classes. '
+                           'Weights are then normalized to mean=1 and capped at 10×.')
+
+  parser.add_argument('--seed', type=int, default=None,
+                      help='Global random seed (torch, numpy, env). None = no explicit seeding.')
 
   parser.set_defaults(ae_recon_loss=False, ppo_norm_advantages=False, ortho_init=False,
                       encoder_lr_cosine=False, use_world_model=False, wm_standalone_train=False,

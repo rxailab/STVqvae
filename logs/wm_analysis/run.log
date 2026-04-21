@@ -1,0 +1,314 @@
+
+=== v2_baseline ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_best_model.pt
+Transition model loaded (2,895,938 params)
+Encoder v2, codebook=64, n_latents=81
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           29.5%      32.7%  991,422
+  wall            43.1%      31.0% 1,283,160
+  door            81.0%       0.0%   58,166
+  key             46.2%       0.0%   32,630
+  goal            99.0%      23.7%   30,000
+  agent           55.5%       4.7%   34,622
+
+Pearson r (probe vs WM accuracy): -0.264
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v2_baseline.json
+
+=== v5_spatial ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v5enc_best_model.pt
+Transition model loaded (2,337,794 params)
+Encoder v5, codebook=64, n_latents=64
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty            9.4%      29.2%  812,440
+  wall            23.8%      76.4%  990,000
+  door            51.9%       0.0%   29,695
+  key             27.7%       0.2%   27,865
+  goal            78.0%      98.5%   30,000
+  agent           31.7%       0.1%   30,000
+
+Pearson r (probe vs WM accuracy): 0.418
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v5_spatial.json
+
+=== v5_deadcode ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v5enc_deadcode_best_model.pt
+Transition model loaded (2,337,794 params)
+Encoder v5, codebook=64, n_latents=64
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           24.3%      18.8%  812,223
+  wall            37.7%      64.6%  990,000
+  door            96.0%       0.0%   29,836
+  key             44.7%       0.1%   27,941
+  goal            99.8%      91.9%   30,000
+  agent           36.8%       0.2%   30,000
+
+Pearson r (probe vs WM accuracy): 0.331
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v5_deadcode.json
+
+=== v6_full ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v6enc_goal_best_model.pt
+Transition model loaded (5,508,098 params)
+Encoder v6, codebook=256, n_latents=64
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           42.0%      30.2%  813,413
+  wall            51.3%      53.6%  990,000
+  door            99.1%       5.6%   29,882
+  key             54.1%       3.1%   26,705
+  goal           100.0%      72.7%   30,000
+  agent           60.5%       0.8%   30,000
+
+Pearson r (probe vs WM accuracy): 0.211
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v6_full.json
+
+=== v9_patch ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v9enc_patch_best_model.pt
+Transition model loaded (5,508,098 params)
+Encoder v9, codebook=256, n_latents=64
+
+Running semantic probe (30000 frames)...
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           22.7%       7.1%  812,528
+  wall            44.0%      41.0%  990,000
+  door            74.5%       0.0%   29,914
+  key             60.3%       2.3%   27,558
+  goal            93.3%      16.8%   30,000
+  agent           32.4%       0.3%   30,000
+
+Pearson r (probe vs WM accuracy): -0.000
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v9_patch.json
+
+=== v6a_rgb_only ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/doorkey_v6aenc_ablation_best_model.pt
+Transition model loaded (2,337,794 params)
+Encoder v6a, codebook=64, n_latents=64
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           30.3%      15.0%  813,285
+  wall            34.9%      44.2%  990,000
+  door            96.1%       0.1%   29,925
+  key             59.2%       0.0%   26,790
+  goal            93.0%      97.8%   30,000
+  agent           40.4%       0.0%   30,000
+
+Pearson r (probe vs WM accuracy): 0.321
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v6a_rgb_only.json
+
+=== v6b_coord_only ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/doorkey_v6benc_ablation_best_model.pt
+Transition model loaded (2,337,794 params)
+Encoder v6b, codebook=64, n_latents=64
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           21.9%      20.4%  812,497
+  wall            50.3%      56.4%  990,000
+  door            90.5%      21.3%   29,869
+  key             60.0%       0.0%   27,634
+  goal            99.3%      70.0%   30,000
+  agent           36.5%       0.9%   30,000
+
+Pearson r (probe vs WM accuracy): 0.480
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v6b_coord_only.json
+
+=== v6c_wide_trunk ===
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/doorkey_v6cenc_ablation_best_model.pt
+Transition model loaded (2,337,794 params)
+Encoder v6c, codebook=64, n_latents=64
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           32.2%      24.7%  813,067
+  wall            47.5%      53.6%  990,000
+  door            94.4%       0.0%   29,712
+  key             51.4%       0.0%   27,221
+  goal            99.8%       7.6%   30,000
+  agent           47.2%       0.0%   30,000
+
+Pearson r (probe vs WM accuracy): -0.410
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v6c_wide_trunk.json
+
+════════════════════════════════════════════════════════
+  SUMMARY: Pearson r (probe vs WM accuracy per class)
+════════════════════════════════════════════════════════
+  v2_baseline           r=-0.264  |  empty(p=30%,w=33%), wall(p=43%,w=31%), door(p=81%,w=0%), key(p=46%,w=0%), goal(p=99%,w=24%), agent(p=56%,w=5%)
+  v5_deadcode           r=0.331  |  empty(p=24%,w=19%), wall(p=38%,w=65%), door(p=96%,w=0%), key(p=45%,w=0%), goal(p=100%,w=92%), agent(p=37%,w=0%)
+  v5_spatial            r=0.418  |  empty(p=9%,w=29%), wall(p=24%,w=76%), door(p=52%,w=0%), key(p=28%,w=0%), goal(p=78%,w=99%), agent(p=32%,w=0%)
+  v6_full               r=0.211  |  empty(p=42%,w=30%), wall(p=51%,w=54%), door(p=99%,w=6%), key(p=54%,w=3%), goal(p=100%,w=73%), agent(p=60%,w=1%)
+  v6a_rgb_only          r=0.321  |  empty(p=30%,w=15%), wall(p=35%,w=44%), door(p=96%,w=0%), key(p=59%,w=0%), goal(p=93%,w=98%), agent(p=40%,w=0%)
+  v6b_coord_only        r=0.480  |  empty(p=22%,w=20%), wall(p=50%,w=56%), door(p=91%,w=21%), key(p=60%,w=0%), goal(p=99%,w=70%), agent(p=36%,w=1%)
+  v6c_wide_trunk        r=-0.410  |  empty(p=32%,w=25%), wall(p=47%,w=54%), door(p=94%,w=0%), key(p=51%,w=0%), goal(p=100%,w=8%), agent(p=47%,w=0%)
+  v9_patch              r=-0.000  |  empty(p=23%,w=7%), wall(p=44%,w=41%), door(p=74%,w=0%), key(p=60%,w=2%), goal(p=93%,w=17%), agent(p=32%,w=0%)
+
+Results saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis

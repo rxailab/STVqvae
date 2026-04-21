@@ -1,0 +1,44 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-16x16-v0/sweep_doorkey16_v6_s3_best_model.pt
+Transition model loaded (38,145,026 params)
+Encoder v6, codebook=512, n_latents=256
+
+Running semantic probe (20000 frames)...
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/sklearn/linear_model/_logistic.py:406: ConvergenceWarning: lbfgs failed to converge after 300 iteration(s) (status=1):
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+Increase the number of iterations to improve the convergence (max_iter=300).
+You might also want to scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+Please also refer to the documentation for alternative solver options:
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+  n_iter_i = _check_optimize_result(
+
+Collecting 5000 transitions for WM analysis...
+  1000/5000 frames
+  2000/5000 frames
+  3000/5000 frames
+  4000/5000 frames
+  5000/5000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           29.4%      30.4% 3,580,428
+  wall            65.0%      44.0% 1,460,000
+  door            97.5%       0.0%   19,982
+  key             84.8%       0.0%   19,590
+  goal            98.8%      91.9%   20,000
+  agent           50.6%       0.0%   20,000
+
+Pearson r (probe vs WM accuracy): 0.201
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis_dk16/dk16_s3.json

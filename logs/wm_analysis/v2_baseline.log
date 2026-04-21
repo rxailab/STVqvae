@@ -1,0 +1,36 @@
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_best_model.pt
+Transition model loaded (2,895,938 params)
+Encoder v2, codebook=64, n_latents=81
+
+Running semantic probe (30000 frames)...
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+    https://scikit-learn.org/stable/modules/preprocessing.html
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           29.5%      32.7%  991,422
+  wall            43.1%      31.0% 1,283,160
+  door            81.0%       0.0%   58,166
+  key             46.2%       0.0%   32,630
+  goal            99.0%      23.7%   30,000
+  agent           55.5%       4.7%   34,622
+
+Pearson r (probe vs WM accuracy): -0.264
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v2_baseline.json

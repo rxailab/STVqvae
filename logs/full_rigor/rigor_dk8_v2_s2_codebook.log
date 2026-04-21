@@ -1,0 +1,51 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/rigor_dk8_v2_s2_best_model.pt
+Env: MiniGrid-DoorKey-8x8-v0 (crafter=False)
+Codebook: 64, Embed: 64
+Constructed VQVAE with 64 latents and 64 codebook entries
+EMA utilization: 64/64
+
+Collecting 8000 frames...
+  5000/8000 frames collected
+Collected 512,000 (code, class) pairs
+
+============================================================
+CODEBOOK USAGE ANALYSIS
+============================================================
+  Codebook size        : 64
+  Active codes         : 63/64 (98.4%)
+  Dead codes           : 1/64 (1.6%)
+  Avg code purity      : 74.1%
+  H(class|code)        : 0.801 bits  (lower = codes are class-pure)
+  H(code|class)        : 4.203 bits  (lower = each class uses few codes)
+  H(code) [marginal]   : 4.793 bits  (max=6.0)
+
+  Code allocation per class:
+    Class          # Codes   Data %
+    --------------------------------
+    empty               25    42.2%
+    wall                35    51.6%
+    door                 2     1.6%
+    key                  1     1.5%
+    goal                 0     1.6%
+    agent                0     1.6%
+
+  Top 10 most-used codes:
+    Code   21:   62985 uses, dominant=empty (68% pure)
+    Code   22:   47986 uses, dominant=empty (58% pure)
+    Code   13:   44603 uses, dominant=wall (70% pure)
+    Code   49:   38491 uses, dominant=wall (87% pure)
+    Code   33:   31426 uses, dominant=empty (58% pure)
+    Code   32:   29393 uses, dominant=empty (66% pure)
+    Code   63:   20948 uses, dominant=wall (98% pure)
+    Code    0:   15900 uses, dominant=wall (99% pure)
+    Code   47:   15071 uses, dominant=empty (76% pure)
+    Code   37:   14424 uses, dominant=wall (99% pure)
+============================================================
+
+Saved to /home/xiar3/experiments/STVqvae/logs/full_rigor/rigor_dk8_v2_s2_codebook.json

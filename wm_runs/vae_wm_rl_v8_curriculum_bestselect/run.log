@@ -1,0 +1,46 @@
+[2026-03-22T05:00:55Z] Starting v8_curriculum_bestselect
+RUN_DIR=/home/xiar3/experiments/STVqvae/wm_runs/vae_wm_rl_v8_curriculum_bestselect
+PYTHON_BIN=/home/xiar3/experiments/STVqvae/../miniforge3/envs/stvqvae/bin/python
+DEVICE=cuda RL_EVAL_FREQ=20480 RL_EVAL_EPISODES=20
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:129: UserWarning: CUDA initialization: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 304: OS call failed or operation not supported on this OS (Triggered internally at /pytorch/c10/cuda/CUDAFunctions.cpp:109.)
+  return torch._C._cuda_getDeviceCount() > 0
+Applied GPU optimizations:
+  Batch size: 1024
+  Eval batch size: 128
+  Data workers: 0
+  Preload data: False
+  Mixed precision: False
+  Accumulation steps: 8
+Namespace(env_name='MiniGrid-LavaCrossingS9N1-v0', model_dir='/home/xiar3/experiments/STVqvae/wm_runs/vae_wm_rl_v8_curriculum_bestselect', ae_model_type='vae', ae_model_version='2', trans_model_type='continuous', trans_model_version='1', device='cuda', epochs=20, trans_epochs=80, batch_size=1024, log_freq=500, checkpoint_freq=5, learning_rate=0.0003, trans_learning_rate=0.0003, max_transitions=None, recon_loss_clip=0, unique_data=False, load=False, cache=True, preprocess=False, wandb=False, comet_ml=False, extra_info=None, n_preload=0, upload_model=False, save=True, n_train_unroll=12, preload_data=False, env_max_steps=None, rl_unroll_steps=16, rl_train_steps=300000, rl_stage_unrolls='8,12,16', rl_stage_steps='100000,100000,100000', rl_eval_freq=20480, rl_eval_episodes=20, rl_eval_max_episode_steps=500, exact_comp=False, log_state_reprs=False, tags=None, extra_buffer_keys=[], eval_policies=['random'], eval_batch_size=128, eval_unroll_steps=20, log_norms=False, ae_grad_clip=0, e2e_loss=False, obs_resize=None, obs_resize_mode='bilinear', no_obs_resize=False, embedding_dim=64, latent_dim=128, filter_size=9, codebook_size=16, ae_model_hash=None, trans_hidden=512, trans_depth=5, stochastic='simple', fta_tiles=20, fta_bound_low=-2, fta_bound_high=2, fta_eta=0.2, repr_sparsity=0, sparsity_type='random', vq_trans_loss_type='mse', vq_trans_1d_conv=False, vq_trans_state_snap=False, entropy_penalty_coef=0.0, code_dropout_rate=0.0, mae_mask_ratio=0.0, mae_patch_size=4, mae_loss_coef=1.0, ctx_aux_coef=1.0, ctx_channels=64, ctx_cond_type='concat', commitment_cost=0.25, ema_decay=0.99, persistent_workers=False, use_amp=False, accumulation_steps=8, pin_memory=False, prefetch_factor=2)
+Starting sequential training...
+Step 1: Training encoder...
+  Dataset created in 3.55s
+Constructed VAE with 128-dim latent space
+❌ Training failed with error: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 304: OS call failed or operation not supported on this OS
+Traceback (most recent call last):
+  File "/home/xiar3/experiments/STVqvae/discrete_mbrl/full_train_eval.py", line 45, in main
+    encoder_model = train_encoder(args)
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/xiar3/experiments/STVqvae/discrete_mbrl/train_encoder.py", line 83, in train_encoder
+    model = model.to(args.device)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1343, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/nn/modules/module.py", line 903, in _apply
+    module._apply(fn)
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    param_applied = fn(param)
+                    ^^^^^^^^^
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1329, in convert
+    return t.to(
+           ^^^^^
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling NumCudaDevices() that might have already set an error? Error 304: OS call failed or operation not supported on this OS

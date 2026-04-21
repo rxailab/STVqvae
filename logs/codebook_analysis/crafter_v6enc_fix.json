@@ -1,0 +1,39 @@
+{
+  "n_dead": 144,
+  "n_active": 880,
+  "codebook_size": 1024,
+  "dead_fraction": 0.140625,
+  "avg_purity": 0.4819868853718228,
+  "class_code_count": {
+    "5": 8,
+    "2": 722,
+    "3": 45,
+    "1": 87,
+    "4": 10,
+    "6": 8
+  },
+  "h_class_given_code": 2.1966476689589487,
+  "h_code_given_class": 8.602296966374341,
+  "h_code": 8.788584754689454,
+  "all_classes": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    13,
+    14,
+    15,
+    16,
+    17
+  ],
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/crafter/mf_e2e_semantic_crafter_v6enc_fix_best_model.pt",
+  "env_name": "crafter",
+  "embedding_dim": 64,
+  "ae_model_version": "6"
+}

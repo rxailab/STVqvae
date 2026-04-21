@@ -1,0 +1,114 @@
+{
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/doorkey_v6benc_ablation_best_model.pt",
+  "encoder_version": "6b",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "probe_acc_per_class": {
+    "1": {
+      "acc": 0.2189681931133284,
+      "count": 812497,
+      "name": "empty"
+    },
+    "2": {
+      "acc": 0.5033545454545455,
+      "count": 990000,
+      "name": "wall"
+    },
+    "4": {
+      "acc": 0.9050855401921725,
+      "count": 29869,
+      "name": "door"
+    },
+    "5": {
+      "acc": 0.5996960266338568,
+      "count": 27634,
+      "name": "key"
+    },
+    "8": {
+      "acc": 0.9926333333333334,
+      "count": 30000,
+      "name": "goal"
+    },
+    "10": {
+      "acc": 0.3648,
+      "count": 30000,
+      "name": "agent"
+    }
+  },
+  "wm_acc_per_class": {
+    "1": {
+      "acc": 0.20360900461673737,
+      "count": 216680,
+      "name": "empty"
+    },
+    "2": {
+      "acc": 0.5638295412063599,
+      "count": 264000,
+      "name": "wall"
+    },
+    "4": {
+      "acc": 0.21290571987628937,
+      "count": 7764,
+      "name": "door"
+    },
+    "5": {
+      "acc": 0.00026469031581655145,
+      "count": 7556,
+      "name": "key"
+    },
+    "8": {
+      "acc": 0.699999988079071,
+      "count": 8000,
+      "name": "goal"
+    },
+    "10": {
+      "acc": 0.00937500037252903,
+      "count": 8000,
+      "name": "agent"
+    }
+  },
+  "scatter_data": [
+    {
+      "class": 1,
+      "name": "empty",
+      "probe_acc": 0.219,
+      "wm_acc": 0.2036,
+      "count": 812497
+    },
+    {
+      "class": 2,
+      "name": "wall",
+      "probe_acc": 0.5034,
+      "wm_acc": 0.5638,
+      "count": 990000
+    },
+    {
+      "class": 4,
+      "name": "door",
+      "probe_acc": 0.9051,
+      "wm_acc": 0.2129,
+      "count": 29869
+    },
+    {
+      "class": 5,
+      "name": "key",
+      "probe_acc": 0.5997,
+      "wm_acc": 0.0003,
+      "count": 27634
+    },
+    {
+      "class": 8,
+      "name": "goal",
+      "probe_acc": 0.9926,
+      "wm_acc": 0.7,
+      "count": 30000
+    },
+    {
+      "class": 10,
+      "name": "agent",
+      "probe_acc": 0.3648,
+      "wm_acc": 0.0094,
+      "count": 30000
+    }
+  ],
+  "pearson_r": 0.47976482388959446
+}

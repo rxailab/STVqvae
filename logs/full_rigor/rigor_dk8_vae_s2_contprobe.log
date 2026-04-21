@@ -1,0 +1,46 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/rigor_dk8_vae_s2_best_model.pt
+Env: MiniGrid-DoorKey-8x8-v0
+Encoder type: vae  version=6
+Latent dim: 4096
+
+Collecting 30000 frames...
+  5000/30000 frames
+  10000/30000 frames
+  15000/30000 frames
+  20000/30000 frames
+  25000/30000 frames
+  30000/30000 frames
+Feature matrix: (1920000, 64)  Labels: (1920000,)
+
+Class distribution (total 1,920,000 samples):
+  empty        (id=1):  813,039  (42.3%)
+  wall         (id=2):  990,000  (51.6%)
+  door         (id=4):   29,845  (1.6%)
+  key          (id=5):   27,116  (1.4%)
+  goal         (id=8):   30,000  (1.6%)
+  agent        (id=10):   30,000  (1.6%)
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/sklearn/linear_model/_logistic.py:1184: FutureWarning: 'n_jobs' has no effect since 1.8 and will be removed in 1.10. You provided 'n_jobs=-1', please leave it unspecified.
+  warnings.warn(msg, category=FutureWarning)
+
+============================================================
+PER-CLASS PROBE ACCURACY (continuous latent)
+============================================================
+Class            Accuracy       Count
+----------------------------------------
+  empty             77.1%     813,039
+  wall              85.4%     990,000
+  door              96.5%      29,845
+  key               98.0%      27,116
+  goal              99.7%      30,000
+  agent             98.5%      30,000
+
+  Overall (macro-mean): 92.5%
+  Overall (weighted):   82.7%
+
+Saved to /home/xiar3/experiments/STVqvae/logs/full_rigor/rigor_dk8_vae_s2_contprobe.json

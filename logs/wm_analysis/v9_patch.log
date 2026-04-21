@@ -1,0 +1,32 @@
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v9enc_patch_best_model.pt
+Transition model loaded (5,508,098 params)
+Encoder v9, codebook=256, n_latents=64
+
+Running semantic probe (30000 frames)...
+
+Collecting 8000 transitions for WM analysis...
+  1000/8000 frames
+  2000/8000 frames
+  3000/8000 frames
+  4000/8000 frames
+  5000/8000 frames
+  6000/8000 frames
+  7000/8000 frames
+  8000/8000 frames
+Computing WM per-class accuracy...
+
+======================================================================
+PER-CLASS ANALYSIS
+======================================================================
+Class         Probe Acc     WM Acc    Count
+---------------------------------------------
+  empty           22.7%       7.1%  812,528
+  wall            44.0%      41.0%  990,000
+  door            74.5%       0.0%   29,914
+  key             60.3%       2.3%   27,558
+  goal            93.3%      16.8%   30,000
+  agent           32.4%       0.3%   30,000
+
+Pearson r (probe vs WM accuracy): -0.000
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_analysis/v9_patch.json

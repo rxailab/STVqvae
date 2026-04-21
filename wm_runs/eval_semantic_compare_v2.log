@@ -1,0 +1,123 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+
+============================================================
+  Model: exp31_wm_only
+  Checkpoint: mf_e2e_wm_aux_v2_best_model.pt
+============================================================
+Constructed VQVAE with 81 latents and 64 codebook entries
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 5184), labels: (30000, 81)
+  class dist: {'empty': '50.6%', 'wall': '39.5%', 'goal': '1.2%', 'lava': '7.4%', 'agent': '1.2%'}
+  Training probe...
+    epoch  5/20  loss=1.5157
+    epoch 10/20  loss=1.2119
+    epoch 15/20  loss=1.0731
+    epoch 20/20  loss=1.0041
+
+  [exp31_wm_only]  overall accuracy: 57.4%
+    empty      (id= 1):   89.5%  (1230000 samples)
+    wall       (id= 2):   30.6%  (960000 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    lava       (id= 9):    0.0%  (180000 samples)
+    agent      (id=10):    0.0%  (30000 samples)
+
+  [exp31_wm_only] sample 9×9 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7  c8
+  r0:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  ·✗  ·✗  ·✗  ·✗  W✓  W✓  W✓]
+  r1:  GT=[W  A  ·  ·  ·  ·  L  ·  W]  Pred=[W✓  W✗  ·✓  ·✓  ·✓  ·✓  W✗  W✗  W✓]
+  r2:  GT=[W  ·  ·  ·  ·  ·  L  ·  W]  Pred=[·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗  W✗  W✓]
+  r3:  GT=[W  ·  ·  ·  ·  ·  L  ·  W]  Pred=[·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗  W✗  W✓]
+  r4:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✗  W✓]
+  r5:  GT=[W  ·  ·  ·  ·  ·  L  ·  W]  Pred=[·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗  ·✓  W✓]
+  r6:  GT=[W  ·  ·  ·  ·  ·  L  ·  W]  Pred=[·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗  W✗  W✓]
+  r7:  GT=[W  ·  ·  ·  ·  ·  L  G  W]  Pred=[·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗  W✗  W✓]
+  r8:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[·✗  ·✗  ·✗  ·✗  ·✗  ·✗  ·✗  W✓  W✓]
+
+============================================================
+  Model: exp33_sem_aux
+  Checkpoint: mf_e2e_semantic_aux_best_model.pt
+============================================================
+Constructed VQVAE with 81 latents and 64 codebook entries
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 5184), labels: (30000, 81)
+  class dist: {'empty': '50.6%', 'wall': '39.5%', 'goal': '1.2%', 'lava': '7.4%', 'agent': '1.2%'}
+  Training probe...
+    epoch  5/20  loss=0.9685
+    epoch 10/20  loss=0.6436
+    epoch 15/20  loss=0.5204
+    epoch 20/20  loss=0.4585
+
+  [exp33_sem_aux]  overall accuracy: 86.0%
+    empty      (id= 1):   90.2%  (1230000 samples)
+    wall       (id= 2):   92.8%  (960000 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    lava       (id= 9):   49.7%  (180000 samples)
+    agent      (id=10):    0.0%  (30000 samples)
+
+  [exp33_sem_aux] sample 9×9 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7  c8
+  r0:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  A  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r2:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r3:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[·✗  L✗  L✗  L✗  L✗  L✗  L✗  ·✓  ·✗]
+  r4:  GT=[W  L  L  L  L  L  L  ·  W]  Pred=[W✓  ·✗  L✓  L✓  L✓  L✓  L✓  ·✓  ·✗]
+  r5:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✗  W✓]
+  r6:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r7:  GT=[W  ·  ·  ·  ·  ·  ·  G  W]  Pred=[W✓  W✗  ·✓  ·✓  ·✓  ·✓  ·✓  W✗  W✓]
+  r8:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+
+============================================================
+  Model: exp34_sem_v2
+  Checkpoint: mf_e2e_semantic_aux_v2_best_model.pt
+============================================================
+Constructed VQVAE with 81 latents and 64 codebook entries
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 5184), labels: (30000, 81)
+  class dist: {'empty': '50.6%', 'wall': '39.5%', 'goal': '1.2%', 'lava': '7.4%', 'agent': '1.2%'}
+  Training probe...
+    epoch  5/20  loss=0.9241
+    epoch 10/20  loss=0.6494
+    epoch 15/20  loss=0.5263
+    epoch 20/20  loss=0.4648
+
+  [exp34_sem_v2]  overall accuracy: 84.4%
+    empty      (id= 1):   86.2%  (1230000 samples)
+    wall       (id= 2):   94.9%  (960000 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    lava       (id= 9):   45.2%  (180000 samples)
+    agent      (id=10):    0.0%  (30000 samples)
+
+  [exp34_sem_v2] sample 9×9 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7  c8
+  r0:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  A  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✗  W✗  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r2:  GT=[W  L  L  ·  L  L  L  L  W]  Pred=[W✓  W✗  W✗  ·✓  ·✗  ·✗  ·✗  ·✗  W✓]
+  r3:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r4:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r5:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r6:  GT=[W  ·  ·  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  ·✓  ·✓  W✗  W✓]
+  r7:  GT=[W  ·  ·  ·  ·  ·  ·  G  W]  Pred=[W✓  W✗  ·✓  ·✓  ·✓  ·✓  ·✓  W✗  W✓]
+  r8:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+
+============================================================
+  COMPARISON SUMMARY
+============================================================
+  class             exp31_wm_only       exp33_sem_aux        exp34_sem_v2
+  empty                     89.5%               90.2%               86.2%  
+  wall                      30.6%               92.8%               94.9%  
+  goal                       0.0%                0.0%                0.0%  
+  lava                       0.0%               49.7%               45.2%  
+  agent                      0.0%                0.0%                0.0%  
+  OVERALL                   57.4%                 86.0%                 84.4%  

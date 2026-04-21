@@ -1,0 +1,36 @@
+{
+  "env_name": "MiniGrid-LavaCrossingS9N1-v0",
+  "policy_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/models/MiniGrid-LavaCrossingS9N1-v0/ppo_world_model.zip",
+  "model_dir": "/home/xiar3/experiments/STVqvae/wm_runs/vae_wm_rl_v5_curriculum",
+  "ae_model_hash": "393f184899f1c7bd6740a092b342902c",
+  "trans_model_hash": "a4934ab750b13c3dc13e17f928e5cfe4",
+  "n_episodes": 25,
+  "max_steps": 500,
+  "horizons": {
+    "1": {
+      "segments": 1841,
+      "teacher_forced_state_mse": 0.8202968239784241,
+      "open_loop_state_mse": 0.8202968239784241
+    },
+    "3": {
+      "segments": 1793,
+      "teacher_forced_state_mse": 0.8203393816947937,
+      "open_loop_state_mse": 0.8318654298782349
+    },
+    "5": {
+      "segments": 1749,
+      "teacher_forced_state_mse": 0.8201766014099121,
+      "open_loop_state_mse": 0.8401386141777039
+    },
+    "8": {
+      "segments": 1690,
+      "teacher_forced_state_mse": 0.8198273777961731,
+      "open_loop_state_mse": 0.8467458486557007
+    },
+    "12": {
+      "segments": 1616,
+      "teacher_forced_state_mse": 0.8196395039558411,
+      "open_loop_state_mse": 0.8520262241363525
+    }
+  }
+}

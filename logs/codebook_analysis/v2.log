@@ -1,0 +1,64 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_best_model.pt
+Env: MiniGrid-DoorKey-8x8-v0 (crafter=False)
+Codebook: 64, Embed: 64
+Constructed VQVAE with 81 latents and 64 codebook entries
+EMA utilization: 64/64
+
+Collecting 10000 frames...
+  5000/10000 frames collected
+  10000/10000 frames collected
+Collected 810,000 (code, class) pairs
+
+============================================================
+CODEBOOK USAGE ANALYSIS
+============================================================
+  Codebook size        : 64
+  Active codes         : 63/64 (98.4%)
+  Dead codes           : 1/64 (1.6%)
+  Avg code purity      : 70.2%
+  H(class|code)        : 0.958 bits  (lower = codes are class-pure)
+  H(code|class)        : 4.148 bits  (lower = each class uses few codes)
+  H(code) [marginal]   : 4.657 bits  (max=6.0)
+
+  Code allocation per class:
+    Class          # Codes   Data %
+    --------------------------------
+    empty               24    44.0%
+    wall                33    47.9%
+    door                 1     1.4%
+    key                  1     3.9%
+    goal                 0     1.2%
+    agent                4     1.5%
+
+  Top 10 most-used codes:
+    Code   22:  133958 uses, dominant=wall (57% pure)
+    Code    1:   67883 uses, dominant=wall (77% pure)
+    Code    4:   64874 uses, dominant=empty (69% pure)
+    Code    0:   64081 uses, dominant=wall (71% pure)
+    Code   26:   56698 uses, dominant=empty (67% pure)
+    Code   37:   36550 uses, dominant=empty (82% pure)
+    Code   61:   33620 uses, dominant=empty (70% pure)
+    Code   56:   26275 uses, dominant=empty (60% pure)
+    Code   46:   22309 uses, dominant=wall (98% pure)
+    Code   21:   20713 uses, dominant=wall (71% pure)
+============================================================
+Traceback (most recent call last):
+  File "/home/xiar3/experiments/STVqvae/discrete_mbrl/analyze_codebook_usage.py", line 285, in <module>
+    main()
+  File "/home/xiar3/experiments/STVqvae/discrete_mbrl/analyze_codebook_usage.py", line 280, in main
+    json.dump(out, f, indent=2)
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/json/__init__.py", line 179, in dump
+    for chunk in iterable:
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/json/encoder.py", line 432, in _iterencode
+    yield from _iterencode_dict(o, _current_indent_level)
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/json/encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/json/encoder.py", line 377, in _iterencode_dict
+    raise TypeError(f'keys must be str, int, float, bool or None, '
+TypeError: keys must be str, int, float, bool or None, not int64

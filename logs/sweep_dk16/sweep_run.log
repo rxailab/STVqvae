@@ -1,0 +1,44 @@
+
+════════════════════════════════════════════════════════════════
+  [1/3] DoorKey-16x16  Encoder=v6  Seed=1
+  Run: sweep_doorkey16_v6_s1
+════════════════════════════════════════════════════════════════
+  Training 8M steps... (log: /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_doorkey16_v6_s1.log)
+  ✓ Training done: best=0.2266  final=0.0000  avg=0.0246
+  Running semantic probe...
+  ✓ Probe: overall=99.0%  goal=0.4%  door=0.4%
+  Running codebook analysis...
+  ✓ Codebook analysis done
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_dk16_results.csv
+
+════════════════════════════════════════════════════════════════
+  [2/3] DoorKey-16x16  Encoder=v6  Seed=2
+  Run: sweep_doorkey16_v6_s2
+════════════════════════════════════════════════════════════════
+  Training 8M steps... (log: /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_doorkey16_v6_s2.log)
+  ✓ Training done: best=0.2065  final=0.0390  avg=0.0219
+  Running semantic probe...
+  ✓ Probe: overall=97.8%  goal=0.4%  door=0.4%
+  Running codebook analysis...
+  ✓ Codebook analysis done
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_dk16_results.csv
+
+════════════════════════════════════════════════════════════════
+  [3/3] DoorKey-16x16  Encoder=v6  Seed=3
+  Run: sweep_doorkey16_v6_s3
+════════════════════════════════════════════════════════════════
+  Training 8M steps... (log: /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_doorkey16_v6_s3.log)
+  ✓ Training done: best=0.1705  final=0.0461  avg=0.0167
+  Running semantic probe...
+  ✓ Probe: overall=96.6%  goal=0.4%  door=0.4%
+  Running codebook analysis...
+  ✓ Codebook analysis done
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_dk16_results.csv
+
+════════════════════════════════════════════════════════════════
+  DoorKey-16x16 sweep complete!
+════════════════════════════════════════════════════════════════
+encoder,seed,best_reward,final_reward,overall_avg,probe_overall,probe_wall,probe_floor,probe_door,probe_key,probe_goal,probe_agent
+v6,1,0.2266,0.0000,0.0246,99.0,28.5,69.9,0.4,0.4,0.4,0.4
+v6,2,0.2065,0.0390,0.0219,97.8,28.5,69.9,0.4,0.4,0.4,0.4
+v6,3,0.1705,0.0461,0.0167,96.6,28.5,69.9,0.4,0.4,0.4,0.4

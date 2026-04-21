@@ -1,0 +1,4 @@
+encoder,seed,best_reward,final_reward,overall_avg,probe_overall,probe_wall,probe_floor,probe_door,probe_key,probe_goal,probe_agent
+v6,1,0.2266,0.0000,0.0246,99.0,28.5,69.9,0.4,0.4,0.4,0.4
+v6,2,0.2065,0.0390,0.0219,97.8,28.5,69.9,0.4,0.4,0.4,0.4
+v6,3,0.1705,0.0461,0.0167,96.6,28.5,69.9,0.4,0.4,0.4,0.4

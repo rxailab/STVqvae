@@ -1,0 +1,165 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+
+============================================================
+  Model: exp32_dk_wm_only
+  Checkpoint: mf_e2e_wm_doorkey_v1_best_model.pt
+============================================================
+Constructed VQVAE with 81 latents and 64 codebook entries
+  Latent grid: 9×9 = 81 tokens
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 5184), labels: (30000, 81)
+  class dist: {'empty': '41.2%', 'wall': '51.0%', 'door': '3.7%', 'key': '1.4%', 'goal': '1.2%', 'agent': '1.5%'}
+  Training probe...
+    epoch  5/20  loss=1.1247
+    epoch 10/20  loss=0.9366
+    epoch 15/20  loss=0.8601
+    epoch 20/20  loss=0.8196
+
+  [exp32_dk_wm_only]  overall accuracy: 66.9%
+    empty      (id= 1):   62.0%  (1000039 samples)
+    wall       (id= 2):   81.1%  (1239496 samples)
+    door       (id= 4):    0.1%  (89809 samples)
+    key        (id= 5):    0.0%  (33644 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    agent      (id=10):    0.0%  (37012 samples)
+
+  [exp32_dk_wm_only] sample 9×9 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7  c8
+  r0:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[·✗  W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  ·  ·  W  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  W✗  W✓  W✗  W✗  W✗  W✗  ·✗]
+  r2:  GT=[W  ·  A  W  ·  ·  ·  ·  W]  Pred=[W✓  W✗  W✗  W✓  ·✓  ·✓  W✗  ·✓  ·✗]
+  r3:  GT=[W  K  ·  W  ·  ·  ·  ·  W]  Pred=[W✓  ·✗  W✗  W✓  ·✓  ·✓  W✗  ·✓  ·✗]
+  r4:  GT=[W  ·  ·  W  ·  ·  ·  ·  W]  Pred=[W✓  W✗  W✗  W✓  ·✓  ·✓  W✗  ·✓  ·✗]
+  r5:  GT=[W  ·  ·  W  ·  ·  ·  ·  W]  Pred=[W✓  W✗  ·✓  ·✗  ·✓  ·✓  ·✓  ·✓  ·✗]
+  r6:  GT=[W  ·  ·  D  ·  ·  ·  ·  W]  Pred=[W✓  W✗  ·✓  ·✗  ·✓  ·✓  ·✓  ·✓  ·✗]
+  r7:  GT=[W  ·  ·  W  ·  ·  ·  G  W]  Pred=[W✓  W✗  W✗  W✓  ·✓  ·✓  ·✓  ·✗  W✓]
+  r8:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  ·✗  W✓  W✓  W✓  W✓]
+
+============================================================
+  Model: exp36_dk_v5enc
+  Checkpoint: mf_e2e_semantic_doorkey_v5enc_best_model.pt
+============================================================
+Constructed VQVAE with 64 latents and 64 codebook entries
+  Latent grid: 8×8 = 64 tokens
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 4096), labels: (30000, 64)
+  class dist: {'empty': '42.4%', 'wall': '51.6%', 'door': '1.6%', 'key': '1.4%', 'goal': '1.6%', 'agent': '1.6%'}
+  Training probe...
+    epoch  5/20  loss=1.3725
+    epoch 10/20  loss=0.9170
+    epoch 15/20  loss=0.7031
+    epoch 20/20  loss=0.5922
+
+  [exp36_dk_v5enc]  overall accuracy: 82.9%
+    empty      (id= 1):   67.2%  (813143 samples)
+    wall       (id= 2):   97.1%  (990000 samples)
+    door       (id= 4):   92.2%  (29894 samples)
+    key        (id= 5):  100.0%  (26963 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    agent      (id=10):   99.9%  (30000 samples)
+
+  [exp36_dk_v5enc] sample 8×8 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7
+  r0:  GT=[W  W  W  W  W  W  W  W]  Pred=[W✓  ·✗  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  A  ·  W  ·  ·  ·  W]  Pred=[W✓  A✓  ·✓  W✓  W✗  ·✓  ·✓  W✓]
+  r2:  GT=[W  ·  ·  D  ·  ·  ·  W]  Pred=[W✓  W✗  ·✓  D✓  ·✓  W✗  W✗  W✓]
+  r3:  GT=[W  ·  ·  W  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  W✓  ·✓  W✗  W✗  W✓]
+  r4:  GT=[W  K  ·  W  ·  ·  ·  W]  Pred=[W✓  K✓  ·✓  W✓  ·✓  W✗  W✗  W✓]
+  r5:  GT=[W  ·  ·  W  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✓  W✓  ·✓  ·✓  ·✓  W✓]
+  r6:  GT=[W  ·  ·  W  ·  ·  G  W]  Pred=[W✓  ·✓  W✗  W✓  ·✓  ·✓  W✗  W✓]
+  r7:  GT=[W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+
+============================================================
+  Model: exp37_dk_v5_prevq
+  Checkpoint: mf_e2e_semantic_doorkey_v5enc_prevq_best_model.pt
+============================================================
+Constructed VQVAE with 64 latents and 256 codebook entries
+  Latent grid: 8×8 = 64 tokens
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 4096), labels: (30000, 64)
+  class dist: {'empty': '42.3%', 'wall': '51.6%', 'door': '1.5%', 'key': '1.4%', 'goal': '1.6%', 'agent': '1.6%'}
+  Training probe...
+    epoch  5/20  loss=1.3550
+    epoch 10/20  loss=0.9178
+    epoch 15/20  loss=0.7165
+    epoch 20/20  loss=0.6129
+
+  [exp37_dk_v5_prevq]  overall accuracy: 77.7%
+    empty      (id= 1):   54.7%  (812869 samples)
+    wall       (id= 2):   97.1%  (990000 samples)
+    door       (id= 4):   98.3%  (29740 samples)
+    key        (id= 5):   96.7%  (27391 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    agent      (id=10):  100.0%  (30000 samples)
+
+  [exp37_dk_v5_prevq] sample 8×8 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7
+  r0:  GT=[W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  ·  ·  ·  ·  W  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✓  W✓  ·✓  W✓]
+  r2:  GT=[W  ·  ·  ·  ·  W  ·  W]  Pred=[W✓  ·✓  W✗  W✗  ·✓  W✓  ·✓  W✓]
+  r3:  GT=[W  K  ·  ·  ·  D  ·  W]  Pred=[W✓  K✓  ·✓  W✗  ·✓  D✓  W✗  W✓]
+  r4:  GT=[W  ·  ·  ·  ·  W  ·  W]  Pred=[W✓  ·✓  ·✓  W✗  ·✓  W✓  ·✓  W✓]
+  r5:  GT=[W  A  ·  ·  ·  W  ·  W]  Pred=[·✗  A✓  ·✓  W✗  W✗  W✓  W✗  W✓]
+  r6:  GT=[W  ·  ·  ·  ·  W  G  W]  Pred=[·✗  ·✓  ·✓  W✗  W✗  W✓  W✗  W✓]
+  r7:  GT=[W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+
+============================================================
+  Model: exp38_dk_v6_goal
+  Checkpoint: mf_e2e_semantic_doorkey_v6enc_goal_best_model.pt
+============================================================
+Constructed VQVAE with 64 latents and 256 codebook entries
+  Latent grid: 8×8 = 64 tokens
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 4096), labels: (30000, 64)
+  class dist: {'empty': '42.4%', 'wall': '51.6%', 'door': '1.5%', 'key': '1.4%', 'goal': '1.6%', 'agent': '1.6%'}
+  Training probe...
+    epoch  5/20  loss=0.5548
+    epoch 10/20  loss=0.4041
+    epoch 15/20  loss=0.3539
+    epoch 20/20  loss=0.3283
+
+  [exp38_dk_v6_goal]  overall accuracy: 91.1%
+    empty      (id= 1):   89.6%  (813735 samples)
+    wall       (id= 2):   93.0%  (990000 samples)
+    door       (id= 4):   59.4%  (29685 samples)
+    key        (id= 5):   81.8%  (26580 samples)
+    goal       (id= 8):   98.8%  (30000 samples)
+    agent      (id=10):   98.0%  (30000 samples)
+
+  [exp38_dk_v6_goal] sample 8×8 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7
+  r0:  GT=[W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  ·  K  W  ·  ·  ·  W]  Pred=[W✓  ·✓  W✗  W✓  W✗  ·✓  ·✓  W✓]
+  r2:  GT=[W  ·  ·  W  ·  ·  ·  W]  Pred=[·✗  ·✓  ·✓  W✓  ·✓  ·✓  ·✓  W✓]
+  r3:  GT=[W  ·  A  W  ·  ·  ·  W]  Pred=[W✓  ·✓  A✓  W✓  ·✓  ·✓  ·✓  W✓]
+  r4:  GT=[W  ·  ·  D  ·  ·  ·  W]  Pred=[·✗  W✗  ·✓  W✗  ·✓  ·✓  ·✓  W✓]
+  r5:  GT=[W  ·  ·  W  ·  ·  ·  W]  Pred=[W✓  ·✓  W✗  W✓  ·✓  ·✓  ·✓  W✓]
+  r6:  GT=[W  ·  ·  W  ·  ·  G  W]  Pred=[W✓  ·✓  ·✓  W✓  ·✓  ·✓  G✓  W✓]
+  r7:  GT=[W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+
+============================================================
+  COMPARISON SUMMARY
+============================================================
+  class          exp32_dk_wm_only      exp36_dk_v5enc   exp37_dk_v5_prevq    exp38_dk_v6_goal
+  empty                     62.0%               67.2%               54.7%               89.6%  
+  wall                      81.1%               97.1%               97.1%               93.0%  
+  door                       0.1%               92.2%               98.3%               59.4%  
+  key                        0.0%              100.0%               96.7%               81.8%  
+  goal                       0.0%                0.0%                0.0%               98.8%  
+  agent                      0.0%               99.9%              100.0%               98.0%  
+  OVERALL                   66.9%                 82.9%                 77.7%                 91.1%  

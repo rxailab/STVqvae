@@ -1,0 +1,55 @@
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/crafter/mf_e2e_semantic_crafter_v6enc_fix_best_model.pt
+Env: crafter (crafter=True)
+Codebook: 1024, Embed: 64
+Constructed VQVAE with 64 latents and 1024 codebook entries
+EMA utilization: 1024/1024
+
+Collecting 10000 frames...
+  5000/10000 frames collected
+  10000/10000 frames collected
+Collected 640,000 (code, class) pairs
+
+============================================================
+CODEBOOK USAGE ANALYSIS
+============================================================
+  Codebook size        : 1024
+  Active codes         : 880/1024 (85.9%)
+  Dead codes           : 144/1024 (14.1%)
+  Avg code purity      : 48.2%
+  H(class|code)        : 2.197 bits  (lower = codes are class-pure)
+  H(code|class)        : 8.602 bits  (lower = each class uses few codes)
+  H(code) [marginal]   : 8.789 bits  (max=10.0)
+
+  Code allocation per class:
+    Class          # Codes   Data %
+    --------------------------------
+    water               87    21.3%
+    grass              722    43.3%
+    stone               45    13.5%
+    path                10     8.3%
+    sand                 8     5.1%
+    tree                 8     4.9%
+    lava                 0     0.8%
+    coal                 0     1.1%
+    iron                 0     0.6%
+    diamond              0     0.1%
+    plant                0     0.0%
+    fence                0     0.5%
+    player               0     0.1%
+    cow                  0     0.3%
+    zombie               0     0.0%
+
+  Top 10 most-used codes:
+    Code    6:   11983 uses, dominant=grass (44% pure)
+    Code   10:   11662 uses, dominant=grass (44% pure)
+    Code   96:    8608 uses, dominant=grass (55% pure)
+    Code  271:    8195 uses, dominant=grass (54% pure)
+    Code   18:    6634 uses, dominant=grass (45% pure)
+    Code  160:    6506 uses, dominant=grass (39% pure)
+    Code   22:    6468 uses, dominant=grass (43% pure)
+    Code  109:    6091 uses, dominant=grass (47% pure)
+    Code   12:    5456 uses, dominant=grass (45% pure)
+    Code   58:    4991 uses, dominant=grass (60% pure)
+============================================================
+
+Saved to /home/xiar3/experiments/STVqvae/logs/codebook_analysis/crafter_v6enc_fix.json

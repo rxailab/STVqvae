@@ -1,0 +1,126 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: model_free/models/crafter/mf_e2e_semantic_crafter_v6enc_fix_best_model.pt
+Constructed VQVAE with 64 latents and 1024 codebook entries
+Grid: 8x8=64 tokens | codebook=1024 | embed_dim=64
+Codebook utilisation (EMA>0.5): 1024/1024 (100%)
+
+Collecting 20000 frames...
+  5000/20000 frames collected
+  10000/20000 frames collected
+  15000/20000 frames collected
+  20000/20000 frames collected
+Valid tokens: 1,280,000
+
+Label distribution:
+  water       :  257215 (20.1%)
+  grass       :  560106 (43.8%)
+  stone       :  172854 (13.5%)
+  path        :  103055 (8.1%)
+  sand        :   74591 (5.8%)
+  tree        :   65878 (5.1%)
+  lava        :   11101 (0.9%)
+  coal        :   17075 (1.3%)
+  iron        :    5674 (0.4%)
+  diamond     :     437 (0.0%)
+  plant       :     217 (0.0%)
+  fence       :    7197 (0.6%)
+  player      :    1582 (0.1%)
+  cow         :    2984 (0.2%)
+  zombie      :      34 (0.0%)
+
+=======================================================
+PROBE 1: One-hot codebook indices (1024-dim)
+  [OneHot] Epoch 5/25  loss=1.5767  test_acc=44.0%
+  [OneHot] Epoch 10/25  loss=1.5728  test_acc=44.0%
+  [OneHot] Epoch 15/25  loss=1.5723  test_acc=44.0%
+  [OneHot] Epoch 20/25  loss=1.5723  test_acc=44.0%
+  [OneHot] Epoch 25/25  loss=1.5723  test_acc=44.0%
+
+[OneHot] Overall accuracy: 44.0%
+  Class               N     Acc
+  --------------------------------
+  water           51479    4.5%
+  grass          111942   98.1% ✓
+  stone           34621    0.8%
+  path            20517    0.7%
+  sand            15036    0.5%
+  tree            13199    0.3%
+  lava             2295    0.4%
+  coal             3366    0.0%
+  iron             1078    0.8%
+  diamond            95    0.0%
+  plant              44    0.0%
+  fence            1406    0.0%
+  player            324    0.0%
+  cow               593    0.0%
+  zombie              5    0.0%
+  → Classes >10%: 1/15
+
+=======================================================
+PROBE 2: Quantized embedding vectors (64-dim)
+  [Quant] Epoch 5/25  loss=1.6337  test_acc=43.9%
+  [Quant] Epoch 10/25  loss=1.6326  test_acc=43.9%
+  [Quant] Epoch 15/25  loss=1.6323  test_acc=43.8%
+  [Quant] Epoch 20/25  loss=1.6324  test_acc=43.8%
+  [Quant] Epoch 25/25  loss=1.6323  test_acc=43.9%
+
+[Quant] Overall accuracy: 43.9%
+  Class               N     Acc
+  --------------------------------
+  water           51283    0.0%
+  grass          112318  100.0% ✓
+  stone           34618    0.0%
+  path            20603    0.0%
+  sand            14896    0.0%
+  tree            12982    0.0%
+  lava             2238    0.0%
+  coal             3408    0.0%
+  iron             1175    0.0%
+  diamond            88    0.0%
+  plant              45    0.0%
+  fence            1419    0.0%
+  player            325    0.0%
+  cow               597    0.0%
+  zombie              5    0.0%
+  → Classes >10%: 1/15
+
+=======================================================
+PROBE 3: Pre-VQ encoder features (64-dim)
+  [PreVQ] Epoch 5/25  loss=1.6306  test_acc=43.8%
+  [PreVQ] Epoch 10/25  loss=1.6296  test_acc=43.7%
+  [PreVQ] Epoch 15/25  loss=1.6294  test_acc=43.8%
+  [PreVQ] Epoch 20/25  loss=1.6294  test_acc=43.8%
+  [PreVQ] Epoch 25/25  loss=1.6294  test_acc=43.7%
+
+[PreVQ] Overall accuracy: 43.7%
+  Class               N     Acc
+  --------------------------------
+  water           51645    0.3%
+  grass          112060   99.6% ✓
+  stone           34403    0.3%
+  path            20522    0.1%
+  sand            14928    0.0%
+  tree            13303    0.0%
+  lava             2096    0.0%
+  coal             3379    0.0%
+  iron             1158    0.5%
+  diamond            81    0.0%
+  plant              41    0.0%
+  fence            1477    0.0%
+  player            311    0.0%
+  cow               589    0.0%
+  zombie              7    0.0%
+  → Classes >10%: 1/15
+
+=======================================================
+SUMMARY
+  Codebook utilisation  : 1024/1024 (100%)
+  Probe 1 (one-hot idx) : 44.0%
+  Probe 2 (quant emb)   : 43.9%
+  Probe 3 (pre-VQ feat) : 43.7%
+=======================================================

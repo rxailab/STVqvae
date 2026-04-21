@@ -1,0 +1,125 @@
+
+════════════════════════════════════════════════════════════════
+  [1/12] Encoder=v2  Seed=1  Run=sweep_doorkey8_v2_s1
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v2_s1.log)
+  ✓ Training done: best=0.9988 final=0.9984 avg=0.9960
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [2/12] Encoder=v2  Seed=2  Run=sweep_doorkey8_v2_s2
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v2_s2.log)
+  ✓ Training done: best=0.9988 final=0.9975 avg=0.9967
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [3/12] Encoder=v2  Seed=3  Run=sweep_doorkey8_v2_s3
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v2_s3.log)
+  ✓ Training done: best=0.9989 final=0.9986 avg=0.9977
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [4/12] Encoder=v5  Seed=1  Run=sweep_doorkey8_v5_s1
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v5_s1.log)
+  ✓ Training done: best=0.9987 final=0.9982 avg=0.9969
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [5/12] Encoder=v5  Seed=2  Run=sweep_doorkey8_v5_s2
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v5_s2.log)
+  ✓ Training done: best=0.9988 final=0.9982 avg=0.9963
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [6/12] Encoder=v5  Seed=3  Run=sweep_doorkey8_v5_s3
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v5_s3.log)
+  ✓ Training done: best=0.9988 final=0.9981 avg=0.9975
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [7/12] Encoder=v6  Seed=1  Run=sweep_doorkey8_v6_s1
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v6_s1.log)
+  ✓ Training done: best=0.9986 final=0.9981 avg=0.9423
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [8/12] Encoder=v6  Seed=2  Run=sweep_doorkey8_v6_s2
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v6_s2.log)
+  ✓ Training done: best=0.9987 final=0.9982 avg=0.9950
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [9/12] Encoder=v6  Seed=3  Run=sweep_doorkey8_v6_s3
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v6_s3.log)
+  ✓ Training done: best=0.9987 final=0.9984 avg=0.9954
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [10/12] Encoder=v9  Seed=1  Run=sweep_doorkey8_v9_s1
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v9_s1.log)
+  ✓ Training done: best=0.9988 final=0.9984 avg=0.9971
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [11/12] Encoder=v9  Seed=2  Run=sweep_doorkey8_v9_s2
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v9_s2.log)
+  ✓ Training done: best=0.9988 final=0.9985 avg=0.9971
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  [12/12] Encoder=v9  Seed=3  Run=sweep_doorkey8_v9_s3
+════════════════════════════════════════════════════════════════
+  Training... (log: /home/xiar3/experiments/STVqvae/logs/sweep/sweep_doorkey8_v9_s3.log)
+  ✓ Training done: best=0.9988 final=0.9980 avg=0.9965
+  Running semantic probe...
+  ✓ Probe: overall=NA%
+  → Saved to /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+
+════════════════════════════════════════════════════════════════
+  SWEEP COMPLETE — Results in /home/xiar3/experiments/STVqvae/logs/sweep/sweep_results.csv
+════════════════════════════════════════════════════════════════
+encoder,seed,best_reward,final_reward,overall_avg,probe_overall,probe_wall,probe_floor,probe_door,probe_key,probe_goal,probe_agent,codebook_util
+v2,1,0.9988,0.9984,0.9960,NA,NA,NA,NA,NA,NA,NA,NA
+v2,2,0.9988,0.9975,0.9967,NA,NA,NA,NA,NA,NA,NA,NA
+v2,3,0.9989,0.9986,0.9977,NA,NA,NA,NA,NA,NA,NA,NA
+v5,1,0.9987,0.9982,0.9969,NA,NA,NA,NA,NA,NA,NA,NA
+v5,2,0.9988,0.9982,0.9963,NA,NA,NA,NA,NA,NA,NA,NA
+v5,3,0.9988,0.9981,0.9975,NA,NA,NA,NA,NA,NA,NA,NA
+v6,1,0.9986,0.9981,0.9423,NA,NA,NA,NA,NA,NA,NA,NA
+v6,2,0.9987,0.9982,0.9950,NA,NA,NA,NA,NA,NA,NA,NA
+v6,3,0.9987,0.9984,0.9954,NA,NA,NA,NA,NA,NA,NA,NA
+v9,1,0.9988,0.9984,0.9971,NA,NA,NA,NA,NA,NA,NA,NA
+v9,2,0.9988,0.9985,0.9971,NA,NA,NA,NA,NA,NA,NA,NA
+v9,3,0.9988,0.9980,0.9965,NA,NA,NA,NA,NA,NA,NA,NA

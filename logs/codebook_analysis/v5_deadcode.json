@@ -1,0 +1,30 @@
+{
+  "n_dead": 3,
+  "n_active": 61,
+  "codebook_size": 64,
+  "dead_fraction": 0.046875,
+  "avg_purity": 0.9036237366682262,
+  "class_code_count": {
+    "1": 38,
+    "10": 5,
+    "2": 14,
+    "8": 1,
+    "4": 2,
+    "5": 1
+  },
+  "h_class_given_code": 0.3550520361453593,
+  "h_code_given_class": 3.802462325237161,
+  "h_code": 4.835834879198912,
+  "all_classes": [
+    1,
+    2,
+    4,
+    5,
+    8,
+    10
+  ],
+  "model_path": "model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v5enc_deadcode_best_model.pt",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "embedding_dim": 64,
+  "ae_model_version": "5"
+}

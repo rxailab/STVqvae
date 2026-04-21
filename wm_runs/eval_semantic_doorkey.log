@@ -1,0 +1,90 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+
+============================================================
+  Model: exp32_dk_wm_only
+  Checkpoint: mf_e2e_wm_doorkey_v1_best_model.pt
+============================================================
+Constructed VQVAE with 81 latents and 64 codebook entries
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 5184), labels: (30000, 81)
+  class dist: {'empty': '45.1%', 'wall': '49.0%', 'door': '1.6%', 'key': '1.4%', 'goal': '1.2%', 'agent': '1.7%'}
+  Training probe...
+    epoch  5/20  loss=1.1790
+    epoch 10/20  loss=0.9749
+    epoch 15/20  loss=0.8914
+    epoch 20/20  loss=0.8500
+
+  [exp32_dk_wm_only]  overall accuracy: 62.4%
+    empty      (id= 1):   55.9%  (1095445 samples)
+    wall       (id= 2):   75.9%  (1191894 samples)
+    door       (id= 4):    0.0%  (38440 samples)
+    key        (id= 5):    0.0%  (33940 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    agent      (id=10):    0.1%  (40281 samples)
+
+  [exp32_dk_wm_only] sample 9×9 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7  c8
+  r0:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  ·✗  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  ·  K  ·  W  W  ·  ·  W]  Pred=[W✓  W✗  W✗  W✗  W✓  W✓  W✗  W✗  W✓]
+  r2:  GT=[W  ·  ·  ·  D  D  ·  ·  W]  Pred=[W✓  W✗  ·✓  W✗  W✗  W✗  ·✓  W✗  W✓]
+  r3:  GT=[W  ·  ·  ·  W  W  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  W✓  W✓  W✗  W✗  W✓]
+  r4:  GT=[W  ·  ·  ·  W  W  ·  ·  W]  Pred=[W✓  ·✓  ·✓  W✗  W✓  W✓  W✗  W✗  W✓]
+  r5:  GT=[W  ·  ·  ·  W  W  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  W✓  W✓  W✗  W✗  W✓]
+  r6:  GT=[W  ·  ·  ·  W  W  ·  ·  W]  Pred=[W✓  ·✓  ·✓  ·✓  ·✗  ·✗  ·✓  W✗  W✓]
+  r7:  GT=[W  ·  A  ·  W  W  ·  G  W]  Pred=[·✗  W✗  W✗  W✗  ·✗  ·✗  ·✓  W✗  W✓]
+  r8:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[·✗  W✓  W✓  W✓  ·✗  ·✗  ·✗  W✓  W✓]
+
+============================================================
+  Model: exp35_dk_sem_v2
+  Checkpoint: mf_e2e_semantic_doorkey_best_model.pt
+============================================================
+Constructed VQVAE with 81 latents and 64 codebook entries
+  Collecting 30000 frames...
+    10000/30000
+    20000/30000
+    30000/30000
+  embeddings: (30000, 5184), labels: (30000, 81)
+  class dist: {'empty': '43.9%', 'wall': '49.3%', 'door': '2.6%', 'key': '1.4%', 'goal': '1.2%', 'agent': '1.6%'}
+  Training probe...
+    epoch  5/20  loss=1.2145
+    epoch 10/20  loss=1.0211
+    epoch 15/20  loss=0.9404
+    epoch 20/20  loss=0.8978
+
+  [exp35_dk_sem_v2]  overall accuracy: 58.4%
+    empty      (id= 1):   64.6%  (1067408 samples)
+    wall       (id= 2):   61.0%  (1197826 samples)
+    door       (id= 4):    0.2%  (62754 samples)
+    key        (id= 5):    0.0%  (32946 samples)
+    goal       (id= 8):    0.0%  (30000 samples)
+    agent      (id=10):    0.0%  (39066 samples)
+
+  [exp35_dk_sem_v2] sample 9×9 frame   (GT | Pred  — correct=✓ wrong=✗)
+       c0  c1  c2  c3  c4  c5  c6  c7  c8
+  r0:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓  W✓]
+  r1:  GT=[W  ·  D  ·  ·  ·  ·  ·  W]  Pred=[W✓  W✗  ·✗  W✗  W✗  W✗  W✗  W✗  W✓]
+  r2:  GT=[W  A  W  ·  ·  ·  ·  ·  W]  Pred=[W✓  W✗  ·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗]
+  r3:  GT=[W  ·  W  ·  ·  ·  ·  ·  W]  Pred=[W✓  ·✓  ·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗]
+  r4:  GT=[W  ·  W  ·  ·  ·  ·  ·  W]  Pred=[·✗  ·✓  ·✗  ·✓  ·✓  ·✓  ·✓  ·✓  ·✗]
+  r5:  GT=[W  ·  W  ·  ·  ·  ·  ·  W]  Pred=[·✗  ·✓  ·✗  ·✓  ·✓  ·✓  ·✓  ·✓  W✓]
+  r6:  GT=[W  ·  W  ·  ·  ·  ·  ·  W]  Pred=[·✗  ·✓  ·✗  ·✓  ·✓  ·✓  ·✓  W✗  W✓]
+  r7:  GT=[W  K  W  ·  ·  ·  ·  G  W]  Pred=[W✓  W✗  ·✗  W✗  W✗  W✗  W✗  W✗  W✓]
+  r8:  GT=[W  W  W  W  W  W  W  W  W]  Pred=[W✓  W✓  ·✗  W✓  W✓  W✓  W✓  W✓  ·✗]
+
+============================================================
+  COMPARISON SUMMARY
+============================================================
+  class          exp32_dk_wm_only     exp35_dk_sem_v2
+  empty                     55.9%               64.6%  
+  wall                      75.9%               61.0%  
+  door                       0.0%                0.2%  
+  key                        0.0%                0.0%  
+  goal                       0.0%                0.0%  
+  agent                      0.1%                0.0%  
+  OVERALL                   62.4%                 58.4%  

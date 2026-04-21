@@ -542,6 +542,215 @@ class ColorCoordEncoderV6(nn.Module):
         return self.fuse(fused)
 
 
+# ── v6 ablation variants ──────────────────────────────────────────────
+# v6a: RGB shortcut only (no coordinate grid)
+# v6b: Coordinate grid only (no RGB shortcut)
+# v6c: Both shortcuts + full-width trunk (no capacity reduction)
+
+
+class ColorOnlyEncoderV6a(nn.Module):
+    """v6 ablation: RGB shortcut only, no coordinate grid.
+
+    Tests whether the pooled RGB path alone is sufficient to capture
+    colour-discriminable classes (e.g. goal = green).
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        if len(input_dim) <= 1:
+            raise ValueError('ColorOnlyEncoderV6a requires image observations')
+
+        in_channels, height, width = input_dim
+        if height != width:
+            raise ValueError(f'Expected square inputs, got {(height, width)}')
+        if height % filter_size != 0:
+            raise ValueError(
+                f'Input size {height} must be divisible by filter_size {filter_size}')
+
+        self.filter_size = filter_size
+        self.pool_stride = height // filter_size
+
+        color_dim = max(8, embedding_dim // 4)
+        trunk_dim = embedding_dim - color_dim
+        assert trunk_dim >= 16, f'embedding_dim={embedding_dim} too small'
+
+        # RGB shortcut
+        self.color_pool = nn.AvgPool2d(kernel_size=self.pool_stride,
+                                        stride=self.pool_stride)
+        self.color_proj = nn.Sequential(
+            nn.Conv2d(in_channels, color_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # Conv trunk (no coord channels — standard v5 trunk)
+        self.trunk = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, trunk_dim, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+        )
+
+        self.fuse = nn.Sequential(
+            nn.Conv2d(embedding_dim, embedding_dim, kernel_size=1),
+            nn.ReLU(),
+            ResidualBlock(embedding_dim, embedding_dim),
+        )
+
+    def forward(self, x):
+        trunk = self.trunk(x)
+        color = self.color_proj(self.color_pool(x))
+        fused = torch.cat([trunk, color], dim=1)
+        return self.fuse(fused)
+
+
+class CoordOnlyEncoderV6b(nn.Module):
+    """v6 ablation: coordinate grid only, no RGB shortcut.
+
+    Tests whether absolute position encoding alone provides the
+    discriminability boost, independent of the colour path.
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        if len(input_dim) <= 1:
+            raise ValueError('CoordOnlyEncoderV6b requires image observations')
+
+        in_channels, height, width = input_dim
+        if height != width:
+            raise ValueError(f'Expected square inputs, got {(height, width)}')
+        if height % filter_size != 0:
+            raise ValueError(
+                f'Input size {height} must be divisible by filter_size {filter_size}')
+
+        self.filter_size = filter_size
+
+        coord_dim = max(4, embedding_dim // 8)
+        trunk_dim = embedding_dim - coord_dim
+        assert trunk_dim >= 16, f'embedding_dim={embedding_dim} too small'
+
+        # Coordinate projection
+        self.coord_proj = nn.Sequential(
+            nn.Conv2d(2, coord_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # Conv trunk with coord input (same as v6)
+        self.trunk = nn.Sequential(
+            nn.Conv2d(in_channels + 2, 64, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, trunk_dim, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+        )
+
+        self.fuse = nn.Sequential(
+            nn.Conv2d(embedding_dim, embedding_dim, kernel_size=1),
+            nn.ReLU(),
+            ResidualBlock(embedding_dim, embedding_dim),
+        )
+
+    def _coord_grid(self, batch_size, device, dtype):
+        axis = torch.linspace(-1.0, 1.0, self.filter_size, device=device, dtype=dtype)
+        yy, xx = torch.meshgrid(axis, axis, indexing='ij')
+        grid = torch.stack([xx, yy], dim=0).unsqueeze(0)
+        return grid.expand(batch_size, -1, -1, -1)
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+        coord_hi = self._coord_grid(batch_size, x.device, x.dtype)
+        if coord_hi.shape[-1] != x.shape[-1]:
+            coord_hi = torch.nn.functional.interpolate(
+                coord_hi, size=x.shape[-2:], mode='bilinear', align_corners=False)
+
+        trunk = self.trunk(torch.cat([x, coord_hi], dim=1))
+        coord_lo = self.coord_proj(self._coord_grid(batch_size, x.device, x.dtype))
+        fused = torch.cat([trunk, coord_lo], dim=1)
+        return self.fuse(fused)
+
+
+class WideTrunkEncoderV6c(nn.Module):
+    """v6 ablation: RGB + coords + full-width trunk (no capacity reduction).
+
+    In original v6, the trunk is narrowed to make room for color_dim + coord_dim.
+    This variant keeps the trunk at full embedding_dim width and projects the
+    concatenation down, testing whether v6's capacity split hurts the trunk.
+    """
+
+    def __init__(self, input_dim, embedding_dim=64, filter_size=8):
+        super().__init__()
+        if len(input_dim) <= 1:
+            raise ValueError('WideTrunkEncoderV6c requires image observations')
+
+        in_channels, height, width = input_dim
+        if height != width:
+            raise ValueError(f'Expected square inputs, got {(height, width)}')
+        if height % filter_size != 0:
+            raise ValueError(
+                f'Input size {height} must be divisible by filter_size {filter_size}')
+
+        self.filter_size = filter_size
+        self.pool_stride = height // filter_size
+
+        color_dim = max(8, embedding_dim // 4)
+        coord_dim = max(4, embedding_dim // 8)
+        # Full-width trunk — no capacity reduction
+        trunk_dim = embedding_dim
+
+        # RGB shortcut
+        self.color_pool = nn.AvgPool2d(kernel_size=self.pool_stride,
+                                        stride=self.pool_stride)
+        self.color_proj = nn.Sequential(
+            nn.Conv2d(in_channels, color_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # Coordinate projection
+        self.coord_proj = nn.Sequential(
+            nn.Conv2d(2, coord_dim, kernel_size=1),
+            nn.ReLU(),
+        )
+
+        # Full-width conv trunk with coord input
+        self.trunk = nn.Sequential(
+            nn.Conv2d(in_channels + 2, 64, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, trunk_dim, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+        )
+
+        # Wider concatenation → project down to embedding_dim
+        concat_dim = trunk_dim + color_dim + coord_dim  # > embedding_dim
+        self.fuse = nn.Sequential(
+            nn.Conv2d(concat_dim, embedding_dim, kernel_size=1),
+            nn.ReLU(),
+            ResidualBlock(embedding_dim, embedding_dim),
+        )
+
+    def _coord_grid(self, batch_size, device, dtype):
+        axis = torch.linspace(-1.0, 1.0, self.filter_size, device=device, dtype=dtype)
+        yy, xx = torch.meshgrid(axis, axis, indexing='ij')
+        grid = torch.stack([xx, yy], dim=0).unsqueeze(0)
+        return grid.expand(batch_size, -1, -1, -1)
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+        coord_hi = self._coord_grid(batch_size, x.device, x.dtype)
+        if coord_hi.shape[-1] != x.shape[-1]:
+            coord_hi = torch.nn.functional.interpolate(
+                coord_hi, size=x.shape[-2:], mode='bilinear', align_corners=False)
+
+        trunk = self.trunk(torch.cat([x, coord_hi], dim=1))
+        color = self.color_proj(self.color_pool(x))
+        coord_lo = self.coord_proj(self._coord_grid(batch_size, x.device, x.dtype))
+        fused = torch.cat([trunk, color, coord_lo], dim=1)
+        return self.fuse(fused)
+
+
 class GatedInputSkipEncoderV8(nn.Module):
     """Full-capacity trunk + gated input-level skip connection.
 
@@ -934,6 +1143,55 @@ def make_ae_v6(input_dim, embedding_dim=None, filter_size=None):
     return encoder, decoder
 
 
+def _make_v6_decoder(input_dim, embedding_dim):
+    """Shared v5-style decoder for all v6 ablation variants."""
+    H, W = input_dim[1], input_dim[2]
+    channels = [input_dim[0], 64, 128, embedding_dim]
+    decoder_layers = []
+    for i in reversed(range(3)):
+        decoder_layers.append(nn.ConvTranspose2d(
+            channels[i + 1], channels[i], kernel_size=4, stride=2, padding=1))
+        decoder_layers.append(nn.ReLU())
+    decoder_layers.append(nn.AdaptiveAvgPool2d((H, W)))
+    return nn.Sequential(*decoder_layers)
+
+
+def make_ae_v6a(input_dim, embedding_dim=None, filter_size=None):
+    """v6 ablation — RGB shortcut only (no coordinate grid)."""
+    embedding_dim = embedding_dim or 64
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+    filter_size = filter_size or 8
+    encoder = ColorOnlyEncoderV6a(input_dim, embedding_dim=embedding_dim,
+                                   filter_size=filter_size)
+    decoder = _make_v6_decoder(input_dim, embedding_dim)
+    return encoder, decoder
+
+
+def make_ae_v6b(input_dim, embedding_dim=None, filter_size=None):
+    """v6 ablation — coordinate grid only (no RGB shortcut)."""
+    embedding_dim = embedding_dim or 64
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+    filter_size = filter_size or 8
+    encoder = CoordOnlyEncoderV6b(input_dim, embedding_dim=embedding_dim,
+                                   filter_size=filter_size)
+    decoder = _make_v6_decoder(input_dim, embedding_dim)
+    return encoder, decoder
+
+
+def make_ae_v6c(input_dim, embedding_dim=None, filter_size=None):
+    """v6 ablation — RGB + coords + full-width trunk (no capacity reduction)."""
+    embedding_dim = embedding_dim or 64
+    if len(input_dim) <= 1:
+        return make_dense_ae_v2(input_dim)
+    filter_size = filter_size or 8
+    encoder = WideTrunkEncoderV6c(input_dim, embedding_dim=embedding_dim,
+                                   filter_size=filter_size)
+    decoder = _make_v6_decoder(input_dim, embedding_dim)
+    return encoder, decoder
+
+
 def make_split_encoder_ae(input_dim, embedding_dim=None, ctx_channels=None, filter_size=None):
     """
     Split-encoder architecture: a lightweight local encoder (small RF) feeds the VQ
@@ -1010,6 +1268,12 @@ def make_ae(input_dim, embedding_dim, filter_size, version='2'):
         return make_ae_v5(input_dim, embedding_dim, filter_size)
     elif version == '6':
         return make_ae_v6(input_dim, embedding_dim, filter_size)
+    elif version == '6a':
+        return make_ae_v6a(input_dim, embedding_dim, filter_size)
+    elif version == '6b':
+        return make_ae_v6b(input_dim, embedding_dim, filter_size)
+    elif version == '6c':
+        return make_ae_v6c(input_dim, embedding_dim, filter_size)
     elif version == '7':
         return make_ae_v7(input_dim, embedding_dim, filter_size)
     elif version == '8':
@@ -1105,7 +1369,8 @@ def construct_ae_model(input_dim, args, load=True, latent_activation=False):
                 input_dim, codebook_size=args.codebook_size, embedding_dim=args.embedding_dim,
                 encoder=encoder, decoder=decoder, n_latents=n_latents,
                 commitment_cost=getattr(args, 'commitment_cost', 0.25),
-                ema_decay=getattr(args, 'ema_decay', 0.99))
+                ema_decay=getattr(args, 'ema_decay', 0.99),
+                dead_code_threshold=getattr(args, 'dead_code_threshold', 0.0))
             args_update(args, 'final_latent_dim', model.n_latent_embeds * args.codebook_size)
             print(f'Constructed VQVAE with {model.n_latent_embeds} ' + \
                   f'latents and {args.codebook_size} codebook entries')

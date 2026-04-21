@@ -1,0 +1,52 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v5enc_deadcode_best_model.pt
+Env: MiniGrid-DoorKey-8x8-v0 (crafter=False)
+Codebook: 64, Embed: 64
+Constructed VQVAE with 64 latents and 64 codebook entries
+EMA utilization: 64/64
+
+Collecting 10000 frames...
+  5000/10000 frames collected
+  10000/10000 frames collected
+Collected 640,000 (code, class) pairs
+
+============================================================
+CODEBOOK USAGE ANALYSIS
+============================================================
+  Codebook size        : 64
+  Active codes         : 61/64 (95.3%)
+  Dead codes           : 3/64 (4.7%)
+  Avg code purity      : 90.4%
+  H(class|code)        : 0.355 bits  (lower = codes are class-pure)
+  H(code|class)        : 3.802 bits  (lower = each class uses few codes)
+  H(code) [marginal]   : 4.836 bits  (max=6.0)
+
+  Code allocation per class:
+    Class          # Codes   Data %
+    --------------------------------
+    empty               38    42.3%
+    wall                14    51.6%
+    door                 2     1.6%
+    key                  1     1.5%
+    goal                 1     1.6%
+    agent                5     1.6%
+
+  Top 10 most-used codes:
+    Code   19:   92294 uses, dominant=wall (100% pure)
+    Code   48:   52033 uses, dominant=empty (79% pure)
+    Code   43:   42303 uses, dominant=wall (98% pure)
+    Code    6:   33344 uses, dominant=wall (99% pure)
+    Code   58:   32975 uses, dominant=wall (74% pure)
+    Code   39:   30386 uses, dominant=wall (66% pure)
+    Code   52:   27864 uses, dominant=empty (100% pure)
+    Code   41:   25729 uses, dominant=wall (79% pure)
+    Code   27:   25104 uses, dominant=empty (59% pure)
+    Code   62:   24397 uses, dominant=wall (98% pure)
+============================================================
+
+Saved to /home/xiar3/experiments/STVqvae/logs/codebook_analysis/v5_deadcode.json

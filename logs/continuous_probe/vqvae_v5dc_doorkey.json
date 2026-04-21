@@ -1,0 +1,40 @@
+{
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/mf_e2e_semantic_doorkey_v5enc_deadcode_best_model.pt",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "ae_model_type": "vqvae",
+  "ae_model_version": "5",
+  "n_frames": 30000,
+  "per_class": {
+    "empty": {
+      "acc": 0.8725607121889619,
+      "count": 812481,
+      "class_id": 1
+    },
+    "wall": {
+      "acc": 0.9686313131313131,
+      "count": 990000,
+      "class_id": 2
+    },
+    "door": {
+      "acc": 1.0,
+      "count": 29919,
+      "class_id": 4
+    },
+    "key": {
+      "acc": 1.0,
+      "count": 27600,
+      "class_id": 5
+    },
+    "goal": {
+      "acc": 1.0,
+      "count": 30000,
+      "class_id": 8
+    },
+    "agent": {
+      "acc": 1.0,
+      "count": 30000,
+      "class_id": 10
+    }
+  },
+  "macro_mean_acc": 0.9735320042200458
+}

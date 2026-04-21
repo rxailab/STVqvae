@@ -34,7 +34,15 @@ from streamlit_autorefresh import st_autorefresh
 REPO = Path(__file__).parent
 EXPERIMENTS = REPO / "experiments.md"
 TB_LOG_DIR = REPO / "discrete_mbrl" / "eval_policies" / "logs"
-LOG_DIRS = [Path("/tmp"), Path("/home/xiar3/experiments"), REPO / "wm_runs", REPO / "logs"]
+SWEEP_LOG_DIR = REPO / "logs" / "sweep"
+SWEEP_CSV = SWEEP_LOG_DIR / "sweep_results.csv"
+LOG_DIRS = [
+    Path("/tmp"),
+    Path("/home/xiar3/experiments"),
+    REPO / "wm_runs",
+    REPO / "logs",
+    SWEEP_LOG_DIR,          # ← sweep training logs picked up by Live Progress tab
+]
 
 # ---------------------------------------------------------------------------
 # Retrofuturism colour palette
@@ -963,8 +971,11 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_progress, tab_summary, tab_machine, tab_train, tab_exp = st.tabs([
+tab_progress, tab_sweep, tab_phases, tab_rigor, tab_summary, tab_machine, tab_train, tab_exp = st.tabs([
     "Live Progress",
+    "Multi-Seed Sweep",
+    "Phases 6–8",
+    "Full Rigor",
     "Summary Comparison",
     "Machine Status",
     "Training Progress",
@@ -1283,7 +1294,735 @@ with tab_progress:
             st.plotly_chart(fig_cmp, use_container_width=True, key="multi_run_comparison")
 
 
-# ===== TAB 1 — SUMMARY COMPARISON =========================================
+# ===== TAB 1 — MULTI-SEED SWEEP ===========================================
+with tab_sweep:
+    section_header("Multi-Seed Sweep — DoorKey-8x8")
+
+    # ── Constants ──
+    SWEEP_ENCODERS = ["v2", "v5", "v6", "v9"]
+    SWEEP_SEEDS    = [1, 2, 3]
+    TOTAL_RUNS     = len(SWEEP_ENCODERS) * len(SWEEP_SEEDS)
+
+    # ── Load CSV results ──
+    sweep_df = None
+    if SWEEP_CSV.exists():
+        try:
+            sweep_df = pd.read_csv(SWEEP_CSV)
+        except Exception:
+            sweep_df = None
+
+    # ── Build status dict  {(enc, seed): "done"|"active"|"pending"} ──
+    def _sweep_run_name(enc, seed):
+        return f"sweep_doorkey8_{enc}_s{seed}"
+
+    def _sweep_log(enc, seed):
+        return SWEEP_LOG_DIR / f"{_sweep_run_name(enc, seed)}.log"
+
+    status_map = {}
+    for enc in SWEEP_ENCODERS:
+        for seed in SWEEP_SEEDS:
+            log_p = _sweep_log(enc, seed)
+            in_csv = (sweep_df is not None and
+                      len(sweep_df[(sweep_df["encoder"] == enc) & (sweep_df["seed"] == seed)]) > 0)
+            if in_csv:
+                status_map[(enc, seed)] = "done"
+            elif log_p.exists() and is_process_running(log_p):
+                status_map[(enc, seed)] = "active"
+            elif log_p.exists():
+                status_map[(enc, seed)] = "done"   # finished but CSV not yet updated
+            else:
+                status_map[(enc, seed)] = "pending"
+
+    n_done    = sum(1 for s in status_map.values() if s == "done")
+    n_active  = sum(1 for s in status_map.values() if s == "active")
+    n_pending = sum(1 for s in status_map.values() if s == "pending")
+
+    # ── KPI row ──
+    kc1, kc2, kc3, kc4 = st.columns(4, gap="medium")
+    with kc1:
+        metric_card("Total Runs", str(TOTAL_RUNS))
+    with kc2:
+        metric_card("Completed", str(n_done), badge=f"{n_done}/{TOTAL_RUNS}")
+    with kc3:
+        metric_card("Active", str(n_active))
+    with kc4:
+        # ETA: remaining runs × avg time (assume ~2h/run)
+        remaining = n_active + n_pending
+        eta_h = remaining * 2.0
+        metric_card("Remaining", f"{remaining} runs", badge=f"~{eta_h:.0f}h")
+
+    # ── Progress bar ──
+    overall_pct = round(n_done / TOTAL_RUNS * 100, 1)
+    st.markdown(
+        f'<div style="margin: 0.8rem 0 0.3rem; font-size:0.72rem; '
+        f'color:{TEXT_MUTED}; letter-spacing:0.05em;">Overall sweep progress</div>'
+        f'<div class="prog-wrap">'
+        f'<div class="prog-fill" style="width:{overall_pct}%"></div></div>'
+        f'<div style="font-size:0.7rem; color:{TEXT_MUTED}; '
+        f'margin-top:0.25rem;">{overall_pct}% ({n_done}/{TOTAL_RUNS} runs)</div>',
+        unsafe_allow_html=True,
+    )
+
+    retro_sep()
+
+    # ── 12-run grid (encoders as columns, seeds as rows) ──
+    section_header("Run Status Grid")
+
+    dot_html = {
+        "done":    f'<span style="color:{NEON_GREEN};">●</span>',
+        "active":  f'<span style="color:{NEON_AMBER}; animation:blink 1s step-end infinite;">●</span>',
+        "pending": f'<span style="color:{TEXT_MUTED};">○</span>',
+    }
+
+    # Header row
+    hdr_cols = st.columns([1] + [2] * len(SWEEP_ENCODERS), gap="small")
+    hdr_cols[0].markdown(
+        f'<div style="font-size:0.68rem;color:{TEXT_MUTED};letter-spacing:0.06em;">SEED</div>',
+        unsafe_allow_html=True)
+    for i, enc in enumerate(SWEEP_ENCODERS):
+        hdr_cols[i + 1].markdown(
+            f'<div style="font-family:Orbitron,sans-serif;font-size:0.75rem;'
+            f'color:{NEON_CYAN};text-align:center;">{enc.upper()}</div>',
+            unsafe_allow_html=True)
+
+    for seed in SWEEP_SEEDS:
+        row_cols = st.columns([1] + [2] * len(SWEEP_ENCODERS), gap="small")
+        row_cols[0].markdown(
+            f'<div style="font-size:0.8rem;color:{TEXT_SECONDARY};padding-top:0.25rem;">s{seed}</div>',
+            unsafe_allow_html=True)
+
+        for i, enc in enumerate(SWEEP_ENCODERS):
+            st_key = status_map.get((enc, seed), "pending")
+            log_p  = _sweep_log(enc, seed)
+
+            # If log exists, extract best reward
+            best_r_str = "—"
+            if log_p.exists():
+                try:
+                    txt = _decode_log(log_p)
+                    hist = parse_reward_history(txt)
+                    if hist:
+                        best_r_str = f"{max(r for _, r in hist):.4f}"
+                    # If still running, show progress too
+                    if st_key == "active":
+                        prog = parse_tqdm_line(txt)
+                        pct_v = prog.get("pct", 0)
+                        eta_v = prog.get("eta", "?")
+                        extra = f"<br><span style='font-size:0.62rem;color:{TEXT_MUTED};'>{pct_v}% · ETA {eta_v}</span>"
+                    else:
+                        extra = ""
+                except Exception:
+                    extra = ""
+            else:
+                extra = ""
+
+            dot = dot_html[st_key]
+            color = NEON_GREEN if st_key == "done" else (NEON_AMBER if st_key == "active" else TEXT_MUTED)
+            row_cols[i + 1].markdown(
+                f'<div style="background:{BG_CARD};border:1px solid {BORDER_COLOR};'
+                f'border-radius:8px;padding:0.5rem 0.6rem;text-align:center;">'
+                f'<div style="font-size:0.9rem;">{dot}</div>'
+                f'<div style="font-family:Orbitron,sans-serif;font-size:0.78rem;'
+                f'color:{color};margin-top:0.1rem;">{best_r_str}</div>'
+                f'{extra}</div>',
+                unsafe_allow_html=True,
+            )
+
+    retro_sep()
+
+    # ── Active run detail ──
+    active_pairs = [(enc, seed) for (enc, seed), s in status_map.items() if s == "active"]
+    if active_pairs:
+        section_header("Active Run Detail")
+        for enc, seed in active_pairs:
+            log_p = _sweep_log(enc, seed)
+            txt   = _decode_log(log_p)
+            prog  = parse_tqdm_line(txt)
+            hist  = parse_reward_history(txt)
+            snaps = parse_snapback_events(txt)
+            cur   = prog.get("current", 0)
+            total = prog.get("total", 1221)
+            pct   = prog.get("pct", 0)
+            eta   = prog.get("eta", "—")
+            speed = prog.get("speed", 0)
+            best_r = max((r for _, r in hist), default=None)
+            last_r = hist[-1][1] if hist else None
+            run_name = _sweep_run_name(enc, seed)
+
+            best_html = (f'<span class="rs-value best">{best_r:.4f}</span>'
+                         if best_r is not None else '<span class="rs-value">—</span>')
+            last_html = (f'<span class="rs-value highlight">{last_r:.4f}</span>'
+                         if last_r is not None else '<span class="rs-value">—</span>')
+
+            st.markdown(
+                f'<div class="run-card active">'
+                f'<div class="run-name"><span class="live-dot"></span>{run_name}</div>'
+                f'<div class="run-meta">Encoder: {enc.upper()} &nbsp;·&nbsp; Seed: {seed}'
+                f' &nbsp;·&nbsp; {speed:.2f}s/update</div>'
+                f'<div class="prog-wrap"><div class="prog-fill" style="width:{pct}%"></div></div>'
+                f'<div style="display:flex;justify-content:space-between;'
+                f'font-size:0.7rem;color:{TEXT_MUTED};margin-bottom:0.5rem;">'
+                f'<span>{cur} / {total} updates &nbsp;({pct}%)</span>'
+                f'<span>ETA: {eta}</span></div>'
+                f'<div class="run-stats">'
+                f'<div class="run-stat"><span class="rs-label">Best Reward</span>{best_html}</div>'
+                f'<div class="run-stat"><span class="rs-label">Latest</span>{last_html}</div>'
+                f'<div class="run-stat"><span class="rs-label">Snapbacks</span>'
+                f'<span class="rs-value">{len(snaps)}</span></div>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+
+            if hist:
+                updates_h = [u for u, _ in hist]
+                rewards_h = [r for _, r in hist]
+                fig_act = go.Figure()
+                fig_act.add_trace(go.Scatter(
+                    x=updates_h, y=rewards_h,
+                    mode="lines+markers",
+                    line=dict(color=NEON_CYAN, width=2),
+                    marker=dict(size=5, color=NEON_CYAN),
+                    fill="tozeroy",
+                    fillcolor="rgba(0,240,255,0.05)",
+                    name="best reward",
+                ))
+                fig_act.update_layout(
+                    height=200,
+                    margin=dict(t=8, b=25, l=35, r=10),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="JetBrains Mono, monospace", color=TEXT_SECONDARY),
+                    xaxis=dict(title="Update", gridcolor=GRID_COLOR, zeroline=False,
+                               range=[0, total or 1221]),
+                    yaxis=dict(title="Reward", gridcolor=GRID_COLOR, zeroline=False,
+                               range=[0, 1.05]),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_act, use_container_width=True,
+                                key=f"sweep_active_{enc}_s{seed}")
+
+        retro_sep()
+
+    # ── Completed results table ──
+    done_logs = [(enc, seed) for (enc, seed), s in status_map.items() if s == "done"]
+    if done_logs:
+        section_header("Completed Run Results")
+
+        # Build results from logs (more up-to-date than CSV during active sweep)
+        result_rows = []
+        for enc, seed in done_logs:
+            log_p = _sweep_log(enc, seed)
+            row = {"Encoder": enc.upper(), "Seed": seed, "Run": _sweep_run_name(enc, seed)}
+            if log_p.exists():
+                txt = _decode_log(log_p)
+                hist = parse_reward_history(txt)
+                row["Best Reward"] = round(max((r for _, r in hist), default=0), 4)
+                final_m = re.search(r"Final \d+-episode average:\s*([\d.]+)", txt)
+                row["Final Avg"] = round(float(final_m.group(1)), 4) if final_m else None
+                overall_m = re.search(r"Overall average reward:\s*([\d.]+)", txt)
+                row["Overall Avg"] = round(float(overall_m.group(1)), 4) if overall_m else None
+            # Probe results from CSV if available
+            if sweep_df is not None:
+                match = sweep_df[(sweep_df["encoder"] == enc) & (sweep_df["seed"] == seed)]
+                if not match.empty:
+                    r = match.iloc[0]
+                    for col in ["probe_overall", "probe_wall", "probe_floor",
+                                "probe_door", "probe_key", "probe_goal", "probe_agent"]:
+                        if col in r and str(r[col]) not in ("NA", "", "nan"):
+                            row[col.replace("probe_", "probe ").title()] = r[col]
+            result_rows.append(row)
+
+        if result_rows:
+            res_df = pd.DataFrame(result_rows)
+            st.dataframe(res_df, use_container_width=True, hide_index=True,
+                         height=min(500, len(res_df) * 38 + 60))
+
+        retro_sep()
+
+        # ── Reward comparison chart for completed runs ──
+        if len(done_logs) >= 2:
+            section_header("Completed Runs — Reward Comparison")
+            fig_cmp = go.Figure()
+            color_map = {"v2": NEON_AMBER, "v5": NEON_CYAN,
+                         "v6": NEON_GREEN, "v9": NEON_PURPLE}
+            dash_map  = {1: "solid", 2: "dash", 3: "dot"}
+            for enc, seed in done_logs:
+                log_p = _sweep_log(enc, seed)
+                if not log_p.exists():
+                    continue
+                txt  = _decode_log(log_p)
+                hist = parse_reward_history(txt)
+                if not hist:
+                    continue
+                updates_h = [u for u, _ in hist]
+                rewards_h = [r for _, r in hist]
+                fig_cmp.add_trace(go.Scatter(
+                    x=updates_h, y=rewards_h,
+                    mode="lines",
+                    name=f"{enc.upper()} s{seed}",
+                    line=dict(
+                        color=color_map.get(enc, NEON_CYAN),
+                        width=2,
+                        dash=dash_map.get(seed, "solid"),
+                    ),
+                ))
+            fig_cmp.update_layout(
+                height=380,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(family="JetBrains Mono, monospace", color=TEXT_SECONDARY),
+                xaxis=dict(title="Update", gridcolor=GRID_COLOR, zeroline=False),
+                yaxis=dict(title="Best Reward", gridcolor=GRID_COLOR, zeroline=False,
+                           range=[0, 1.05]),
+                legend=dict(font=dict(size=10), bgcolor="rgba(0,0,0,0)",
+                            groupclick="toggleitem"),
+                margin=dict(t=10, b=35, l=40, r=10),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_cmp, use_container_width=True, key="sweep_reward_comparison")
+
+        # ── Per-encoder summary (mean ± std across seeds) ──
+        if sweep_df is not None and not sweep_df.empty and n_done >= 2:
+            retro_sep()
+            section_header("Per-Encoder Summary (mean ± std across seeds)")
+            try:
+                num_cols = [c for c in sweep_df.columns
+                            if c not in ("encoder", "seed") and
+                            pd.to_numeric(sweep_df[c], errors="coerce").notna().any()]
+                agg = sweep_df.copy()
+                for c in num_cols:
+                    agg[c] = pd.to_numeric(agg[c], errors="coerce")
+                grp = agg.groupby("encoder")[num_cols].agg(["mean", "std"]).round(4)
+                st.dataframe(grp, use_container_width=True)
+            except Exception:
+                pass
+
+    elif n_pending == TOTAL_RUNS:
+        st.info("Sweep not started yet. All runs are pending.")
+    else:
+        st.info("No runs completed yet — check back soon.")
+
+
+# ===== TAB 2 — PHASES 6–8 LIVE PROGRESS ==================================
+with tab_phases:
+    section_header("Phases 6–8: Scaling, VAE Baseline & Crafter")
+
+    DK16_LOG_DIR  = REPO / "logs" / "sweep_dk16"
+    DK16_CSV      = DK16_LOG_DIR / "sweep_dk16_results.csv"
+    WM_OUT_DIR    = REPO / "logs" / "wm_analysis"
+    CB_OUT_DIR    = REPO / "logs" / "codebook_analysis"
+    VAE_LOG       = REPO / "logs" / "vae_baseline_doorkey_v6enc.log"
+
+    # ── helper: extract best reward from a training log ──
+    def _best_from_log(log_path):
+        import re as _re
+        if not Path(log_path).exists():
+            return None
+        txt = Path(log_path).read_text(errors="replace")
+        hits = _re.findall(r"New best average reward:\s+([\d.]+)", txt)
+        return float(hits[-1]) if hits else None
+
+    def _iter_from_log(log_path, total):
+        """Return (current_iter, total) by counting tqdm-style lines."""
+        import re as _re
+        if not Path(log_path).exists():
+            return 0, total
+        txt = Path(log_path).read_text(errors="replace")
+        hits = _re.findall(r"\|\s*(\d+)/(\d+)\s*\[", txt)
+        if hits:
+            cur, tot = hits[-1]
+            return int(cur), int(tot)
+        return 0, total
+
+    # ── PHASE 6 — DoorKey-16x16 multi-seed ──────────────────────────────────
+    st.markdown(f"### 🔷 Phase 6 — DoorKey-16×16 Multi-Seed Sweep")
+
+    dk16_df = None
+    if DK16_CSV.exists():
+        try:
+            dk16_df = pd.read_csv(DK16_CSV)
+        except Exception:
+            dk16_df = None
+
+    SEEDS_16 = [1, 2, 3]
+    completed_seeds = set(dk16_df["seed"].tolist()) if dk16_df is not None else set()
+
+    # KPI row
+    k1, k2, k3 = st.columns(3)
+    with k1:
+        n_done = len(completed_seeds)
+        st.metric("Seeds complete", f"{n_done}/3",
+                  delta="training" if n_done < 3 else "done")
+    with k2:
+        if dk16_df is not None and len(dk16_df):
+            avg_best = dk16_df["best_reward"].replace("NA", float("nan")).astype(float).mean()
+            st.metric("Mean best reward", f"{avg_best:.4f}")
+        else:
+            st.metric("Mean best reward", "—")
+    with k3:
+        # find actively training seed
+        import subprocess, re as _re
+        try:
+            ps_out = subprocess.check_output(
+                ["ps", "aux"], text=True, stderr=subprocess.DEVNULL)
+            dk16_procs = [l for l in ps_out.splitlines()
+                          if "train.py" in l and "DoorKey-16x16" in l]
+            if dk16_procs:
+                m = _re.search(r"sweep_doorkey16_v6_s(\d+)", dk16_procs[0])
+                active_seed = m.group(1) if m else "?"
+                st.metric("Active seed", f"s{active_seed} training")
+            else:
+                st.metric("Active seed", "idle / done")
+        except Exception:
+            st.metric("Active seed", "—")
+
+    # Seed progress bars
+    for seed in SEEDS_16:
+        log_path = DK16_LOG_DIR / f"sweep_doorkey16_v6_s{seed}.log"
+        best = _best_from_log(log_path)
+        cur_iter, tot_iter = _iter_from_log(log_path, 1954)
+
+        if seed in completed_seeds:
+            row = dk16_df[dk16_df["seed"] == seed].iloc[0]
+            label = f"**Seed {seed}** ✅  best={row['best_reward']}  final={row['final_reward']}  avg={row['overall_avg']}"
+            pct = 1.0
+        elif log_path.exists() and cur_iter > 0:
+            label = f"**Seed {seed}** 🔄  best so far={best or '—'}  ({cur_iter}/{tot_iter} batches)"
+            pct = cur_iter / tot_iter
+        else:
+            label = f"**Seed {seed}** ⏳ queued"
+            pct = 0.0
+
+        st.markdown(label)
+        st.progress(pct)
+
+    # Completed results table
+    if dk16_df is not None and len(dk16_df):
+        st.markdown("**Completed results:**")
+        disp = dk16_df[["seed","best_reward","final_reward","overall_avg",
+                         "probe_goal","probe_door","probe_wall"]].copy()
+        st.dataframe(disp, use_container_width=True)
+
+    # Codebook highlight for each completed seed
+    cb_jsons = sorted(DK16_LOG_DIR.glob("*_codebook.json"))
+    if cb_jsons:
+        st.markdown("**Codebook allocation (16×16):**")
+        cb_rows = []
+        for jf in cb_jsons:
+            try:
+                import json as _json
+                d = _json.loads(jf.read_text())
+                seed_m = _re.search(r"_s(\d+)_", jf.name)
+                seed_n = seed_m.group(1) if seed_m else "?"
+                cpc = d.get("class_code_count", {})
+                cb_rows.append({
+                    "seed": seed_n,
+                    "active": d.get("n_active", "?"),
+                    "dead": d.get("n_dead", "?"),
+                    "dead%": f"{d.get('dead_fraction',0)*100:.0f}%",
+                    "empty_codes": cpc.get("1", 0),
+                    "wall_codes":  cpc.get("2", 0),
+                    "goal_codes":  cpc.get("8", 0),
+                    "door_codes":  cpc.get("4", 0),
+                    "key_codes":   cpc.get("5", 0),
+                    "agent_codes": cpc.get("10", 0),
+                })
+            except Exception:
+                pass
+        if cb_rows:
+            st.dataframe(pd.DataFrame(cb_rows), use_container_width=True)
+
+    st.divider()
+
+    # ── PHASE 7 — VAE baseline ───────────────────────────────────────────────
+    st.markdown("### 🟣 Phase 7 — Continuous VAE Baseline (DoorKey-8×8)")
+
+    vae_best  = _best_from_log(VAE_LOG)
+    vae_cur, vae_tot = _iter_from_log(VAE_LOG, 1221)
+    vae_pct   = vae_cur / vae_tot if vae_tot > 0 else 0.0
+
+    v7a, v7b = st.columns(2)
+    with v7a:
+        st.metric("Best reward so far", f"{vae_best:.4f}" if vae_best else "—")
+    with v7b:
+        st.metric("Progress", f"{vae_cur}/{vae_tot} batches ({vae_pct*100:.0f}%)")
+
+    if VAE_LOG.exists():
+        st.progress(vae_pct)
+        # show last few lines of log (strip tqdm noise)
+        import re as _re
+        lines = VAE_LOG.read_text(errors="replace").splitlines()
+        clean = [l for l in lines if l.strip() and "%|" not in l and
+                 "FutureWarn" not in l and "Gym has" not in l][-10:]
+        st.code("\n".join(clean), language=None)
+    else:
+        st.info("VAE baseline not yet started.")
+
+    st.divider()
+
+    # ── PHASE 8 — Crafter codebook analysis ─────────────────────────────────
+    st.markdown("### 🟡 Phase 8 — Crafter Codebook Analysis")
+
+    CRAFTER_MODELS = ["v6enc_original", "v6enc_fix", "v6enc_cal", "v6enc_cal2"]
+    crafter_jsons  = {p.stem.replace("crafter_",""): p
+                      for p in CB_OUT_DIR.glob("crafter_*.json")}
+    crafter_done   = [m for m in CRAFTER_MODELS if m in crafter_jsons]
+
+    p8a, p8b = st.columns(2)
+    with p8a:
+        st.metric("Models analyzed", f"{len(crafter_done)}/{len(CRAFTER_MODELS)}")
+    with p8b:
+        remaining = [m for m in CRAFTER_MODELS if m not in crafter_jsons]
+        st.metric("Remaining", ", ".join(remaining) if remaining else "All done ✅")
+
+    # Results table
+    if crafter_jsons:
+        import json as _json
+        crafter_rows = []
+        CRAFTER_CLASSES = {
+            '0':'invalid','1':'water','2':'grass','3':'stone','4':'path',
+            '5':'sand','6':'tree','7':'lava','8':'coal','9':'iron',
+            '10':'diamond','11':'table','12':'furnace','13':'plant',
+            '14':'fence','15':'player','16':'cow','17':'zombie','18':'skeleton'
+        }
+        for model_name in CRAFTER_MODELS:
+            if model_name not in crafter_jsons:
+                crafter_rows.append({"model": model_name, "status": "⏳ pending"})
+                continue
+            try:
+                d = _json.loads(crafter_jsons[model_name].read_text())
+                cb = d.get("codebook_size", "?")
+                n_act = d.get("n_active", "?")
+                n_dead = d.get("n_dead", "?")
+                dead_frac = d.get("dead_fraction", 0)
+                avg_purity = d.get("avg_purity", 0)
+                cpc = d.get("class_code_count", {})
+                # interesting classes
+                row = {
+                    "model": model_name,
+                    "status": "✅",
+                    "cb_size": cb,
+                    "active": n_act,
+                    "dead%": f"{dead_frac*100:.0f}%",
+                    "purity": f"{avg_purity*100:.1f}%",
+                }
+                for cid, cname in [("15","player"),("16","cow"),("17","zombie"),
+                                    ("6","tree"),("2","grass"),("3","stone")]:
+                    row[cname] = cpc.get(cid, 0)
+                crafter_rows.append(row)
+            except Exception as e:
+                crafter_rows.append({"model": model_name, "status": f"❌ {e}"})
+        st.dataframe(pd.DataFrame(crafter_rows), use_container_width=True)
+
+    # WM analysis summary (Phase 5, shown here for reference)
+    wm_jsons = sorted(WM_OUT_DIR.glob("*.json"))
+    if wm_jsons:
+        st.markdown("**Phase 5 WM Accuracy recap (all 8 models):**")
+        import json as _json
+        wm_rows = []
+        for jf in wm_jsons:
+            try:
+                d = _json.loads(jf.read_text())
+                scatter = {s["name"]: s for s in d.get("scatter_data", [])}
+                wm_rows.append({
+                    "model": jf.stem,
+                    "Pearson r": f"{d.get('pearson_r', 0):.3f}",
+                    "goal_probe": f"{scatter.get('goal',{}).get('probe_acc',0)*100:.0f}%",
+                    "goal_WM":    f"{scatter.get('goal',{}).get('wm_acc',0)*100:.0f}%",
+                    "door_WM":    f"{scatter.get('door',{}).get('wm_acc',0)*100:.0f}%",
+                    "wall_WM":    f"{scatter.get('wall',{}).get('wm_acc',0)*100:.0f}%",
+                })
+            except Exception:
+                pass
+        if wm_rows:
+            wm_df = pd.DataFrame(wm_rows).sort_values("Pearson r", ascending=False)
+            st.dataframe(wm_df, use_container_width=True)
+
+
+# ===== TAB 3b — FULL RIGOR SWEEP ==========================================
+with tab_rigor:
+    import json as _json_r, re as _re_r, subprocess as _sub_r
+
+    section_header("Full-Rigor Sweep — DK16 Resolution + DK8 Multi-Seed")
+
+    RIGOR_DIR   = REPO / "logs" / "full_rigor"
+    RIGOR_CSV   = RIGOR_DIR / "full_rigor_results.csv"
+    CURVES_PNG  = REPO / "logs" / "rl_transfer_curves.png"
+
+    def _rigor_best(log_path):
+        if not Path(log_path).exists():
+            return None
+        txt = Path(log_path).read_text(errors="replace")
+        hits = _re_r.findall(r"New best average reward:\s+([\d.]+)", txt)
+        return float(hits[-1]) if hits else None
+
+    def _rigor_iter(log_path, total=1954):
+        if not Path(log_path).exists():
+            return 0, total
+        txt = Path(log_path).read_text(errors="replace")
+        hits = _re_r.findall(r"\|\s*(\d+)/(\d+)\s*\[", txt)
+        if hits:
+            cur, tot = hits[-1]
+            return int(cur), int(tot)
+        return 0, total
+
+    def _active_run():
+        """Return run_name of currently training process (grep ps)."""
+        try:
+            ps = _sub_r.check_output(["ps", "aux"], text=True, stderr=_sub_r.DEVNULL)
+            for line in ps.splitlines():
+                if "train.py" in line:
+                    m = _re_r.search(r"--run_name\s+(\S+)", line)
+                    if m:
+                        return m.group(1)
+        except Exception:
+            pass
+        return None
+
+    active = _active_run()
+
+    # ── KPI strip ────────────────────────────────────────────────────────────
+    rigor_df = None
+    if RIGOR_CSV.exists():
+        try:
+            rigor_df = pd.read_csv(RIGOR_CSV)
+        except Exception:
+            pass
+
+    n_total  = 10   # A1, A2, + 8 DK8 runs
+    n_done   = len(rigor_df) if rigor_df is not None else 0
+    k1, k2, k3 = st.columns(3)
+    with k1:
+        st.metric("Runs complete", f"{n_done}/{n_total}")
+    with k2:
+        st.metric("Currently running", active or "idle")
+    with k3:
+        hrs_left = max(0, (n_total - n_done) * 4)
+        st.metric("Est. hours remaining", f"~{hrs_left} hr")
+
+    st.divider()
+
+    # ── (A) DK-16 Resolution ─────────────────────────────────────────────────
+    st.markdown("### 🔷 (A) DK-16 Resolution — Aggressive Restart vs Smaller Codebook")
+
+    A_RUNS = [
+        ("rigor_dk16_cb512_thr2", "A1: cb=512, thr=2.0 (aggressive restart)", 1954),
+        ("rigor_dk16_cb256_thr1", "A2: cb=256,  thr=1.0 (smaller codebook)",  1954),
+    ]
+    for run_name, label, total in A_RUNS:
+        tlog = RIGOR_DIR / f"{run_name}_train.log"
+        plog = RIGOR_DIR / f"{run_name}_probe.log"
+        cbjson = RIGOR_DIR / f"{run_name}_codebook.json"
+        best = _rigor_best(tlog)
+        cur, tot = _rigor_iter(tlog, total)
+        pct = cur / tot if tot > 0 else 0.0
+
+        if rigor_df is not None and run_name in rigor_df.get("variant", pd.Series()).values:
+            row = rigor_df[rigor_df["variant"] == run_name].iloc[0]
+            status = f"✅ best={row.get('best_reward','?')}  door={row.get('probe_door','?')}%  key={row.get('probe_key','?')}%"
+        elif tlog.exists() and cur > 0:
+            status = f"🔄 {cur}/{tot} iters  best so far={best or '—'}"
+        else:
+            status = "⏳ queued"
+
+        st.markdown(f"**{label}** — {status}")
+        st.progress(pct)
+
+        # Show codebook result if done
+        if cbjson.exists():
+            try:
+                d = _json_r.loads(cbjson.read_text())
+                ca, cd, df_ = d.get("n_active","?"), d.get("n_dead","?"), d.get("dead_fraction",0)
+                st.caption(f"  Codebook: {ca} active / {cd} dead ({df_*100:.0f}% dead)")
+            except Exception:
+                pass
+
+        # Show probe if done
+        if plog.exists():
+            try:
+                txt = plog.read_text(errors="replace")
+                door_m = _re_r.search(r"door.*?([\d.]+)%", txt)
+                key_m  = _re_r.search(r" key .*?([\d.]+)%", txt)
+                goal_m = _re_r.search(r"goal.*?([\d.]+)%", txt)
+                parts = []
+                if door_m: parts.append(f"door={door_m.group(1)}%")
+                if key_m:  parts.append(f"key={key_m.group(1)}%")
+                if goal_m: parts.append(f"goal={goal_m.group(1)}%")
+                if parts:
+                    st.caption("  Probe: " + "  ".join(parts))
+            except Exception:
+                pass
+
+    st.divider()
+
+    # ── (B) DK-8 Multi-seed ───────────────────────────────────────────────────
+    st.markdown("### 🟢 (B) DK-8 Multi-Seed — Error Bars for Paper (seeds 1 & 2)")
+
+    B_VARIANTS = [
+        ("v2",   "v2 (baseline VQ encoder)"),
+        ("v5dc", "v5+dc (dead-code restart)"),
+        ("v6",   "v6 (RGB+coord+trunk)"),
+        ("vae",  "VAE (no VQ bottleneck)"),
+    ]
+    B_SEEDS = [1, 2]
+    B_TOTAL = 1221  # 5M steps / 4096 batch ≈ 1221
+
+    for var_key, var_label in B_VARIANTS:
+        st.markdown(f"**{var_label}**")
+        cols = st.columns(len(B_SEEDS))
+        for ci, seed in enumerate(B_SEEDS):
+            run_name = f"rigor_dk8_{var_key}_s{seed}"
+            tlog = RIGOR_DIR / f"{run_name}_train.log"
+            best = _rigor_best(tlog)
+            cur, tot = _rigor_iter(tlog, B_TOTAL)
+            pct = cur / tot if tot > 0 else 0.0
+            with cols[ci]:
+                if rigor_df is not None and run_name in rigor_df.get("variant", pd.Series()).values:
+                    row = rigor_df[rigor_df["variant"] == run_name].iloc[0]
+                    label_s = f"s{seed} ✅ best={row.get('best_reward','?')}"
+                elif tlog.exists() and cur > 0:
+                    label_s = f"s{seed} 🔄 {cur}/{tot} ({pct*100:.0f}%)"
+                else:
+                    label_s = f"s{seed} ⏳ queued"
+                st.caption(label_s)
+                st.progress(pct)
+
+    st.divider()
+
+    # ── Results table ─────────────────────────────────────────────────────────
+    if rigor_df is not None and not rigor_df.empty:
+        st.markdown("### 📊 Accumulated Results")
+        st.dataframe(rigor_df, use_container_width=True)
+
+        # Seed-wise best-reward summary by variant
+        b_rows = rigor_df[rigor_df["group"] == "B_dk8"].copy()
+        if not b_rows.empty:
+            b_rows["best_reward"] = pd.to_numeric(b_rows["best_reward"], errors="coerce")
+            st.markdown("**DK-8 multi-seed summary (mean ± std):**")
+            summ = b_rows.groupby("variant")["best_reward"].agg(["mean","std","count"])
+            summ.columns = ["mean_best","std_best","n_seeds"]
+            st.dataframe(summ.reset_index(), use_container_width=True)
+
+    st.divider()
+
+    # ── RL Transfer Curve plot ─────────────────────────────────────────────────
+    st.markdown("### 📈 RL Transfer Curves (DK-8)")
+    if CURVES_PNG.exists():
+        st.image(str(CURVES_PNG), caption="Running best reward vs PPO iteration — v2 / v5+dc / v6 / VAE")
+        st.caption("v2 log will appear once its first multi-seed run completes.")
+    else:
+        st.info("Plot not yet generated (`logs/rl_transfer_curves.png`).")
+
+    # ── Live launcher tail ────────────────────────────────────────────────────
+    LAUNCHER_LOG = REPO / "logs" / "full_rigor_launcher.out"
+    if LAUNCHER_LOG.exists():
+        st.markdown("### 🖥 Launcher output (tail)")
+        lines = LAUNCHER_LOG.read_text(errors="replace").splitlines()
+        clean = [l for l in lines if l.strip() and "%|" not in l][-20:]
+        st.code("\n".join(clean), language=None)
+
+
+# ===== TAB 3 — SUMMARY COMPARISON =========================================
 with tab_summary:
     if not EXPERIMENTS.exists():
         st.warning(f"`{EXPERIMENTS}` not found.")

@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrrrrr}
+\toprule
+Model & Empty & Wall & Door & Key & Goal & Agent & Overall \\
+\midrule
+WM-only & 68.1 & 66.7 & 0.0 & 0.0 & 0.0 & 0.0 & 63.6 \\
+v5enc & 64.8 & 95.7 & 87.0 & 100.0 & 0.0 & 99.9 & 81.1 \\
+v5+prevq & 69.4 & 97.4 & 79.4 & 100.0 & 0.0 & 100.0 & 83.8 \\
+v6 goal-aware & 87.4 & 92.6 & 58.9 & 87.6 & 97.4 & 98.9 & 90.0 \\
+v7 multiscale & 71.7 & 83.6 & 77.8 & 98.0 & 80.8 & 94.6 & 78.8 \\
+v8 gated & 53.1 & 83.3 & 77.9 & 98.4 & 95.0 & 92.7 & 71.0 \\
+\bottomrule
+\end{tabular}
+\caption{Semantic probe accuracy on DoorKey. The goal-aware variant strongly improves recoverability of the sparse goal object.}
+\label{tab:doorkey_probe}
+\end{table}

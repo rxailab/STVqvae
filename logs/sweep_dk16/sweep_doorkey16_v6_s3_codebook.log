@@ -1,0 +1,52 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-16x16-v0/sweep_doorkey16_v6_s3_best_model.pt
+Env: MiniGrid-DoorKey-16x16-v0 (crafter=False)
+Codebook: 512, Embed: 64
+Constructed VQVAE with 256 latents and 512 codebook entries
+EMA utilization: 512/512
+
+Collecting 10000 frames...
+  5000/10000 frames collected
+  10000/10000 frames collected
+Collected 2,560,000 (code, class) pairs
+
+============================================================
+CODEBOOK USAGE ANALYSIS
+============================================================
+  Codebook size        : 512
+  Active codes         : 380/512 (74.2%)
+  Dead codes           : 132/512 (25.8%)
+  Avg code purity      : 97.5%
+  H(class|code)        : 0.044 bits  (lower = codes are class-pure)
+  H(code|class)        : 6.720 bits  (lower = each class uses few codes)
+  H(code) [marginal]   : 7.678 bits  (max=9.0)
+
+  Code allocation per class:
+    Class          # Codes   Data %
+    --------------------------------
+    empty              283    69.9%
+    wall                89    28.5%
+    door                 1     0.4%
+    key                  1     0.4%
+    goal                 1     0.4%
+    agent                5     0.4%
+
+  Top 10 most-used codes:
+    Code   90:   60680 uses, dominant=wall (94% pure)
+    Code  461:   40000 uses, dominant=wall (100% pure)
+    Code  371:   40000 uses, dominant=empty (100% pure)
+    Code  227:   39539 uses, dominant=empty (100% pure)
+    Code  140:   29313 uses, dominant=empty (100% pure)
+    Code  286:   27932 uses, dominant=empty (100% pure)
+    Code    6:   27361 uses, dominant=empty (100% pure)
+    Code  454:   27339 uses, dominant=empty (100% pure)
+    Code  152:   26593 uses, dominant=empty (100% pure)
+    Code  223:   25286 uses, dominant=empty (100% pure)
+============================================================
+
+Saved to /home/xiar3/experiments/STVqvae/logs/sweep_dk16/sweep_doorkey16_v6_s3_codebook.json

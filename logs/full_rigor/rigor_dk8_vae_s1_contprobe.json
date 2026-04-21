@@ -1,0 +1,40 @@
+{
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/rigor_dk8_vae_s1_best_model.pt",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "ae_model_type": "vae",
+  "ae_model_version": "6",
+  "n_frames": 30000,
+  "per_class": {
+    "empty": {
+      "acc": 0.834055057222394,
+      "count": 814716,
+      "class_id": 1
+    },
+    "wall": {
+      "acc": 0.8800414141414141,
+      "count": 990000,
+      "class_id": 2
+    },
+    "door": {
+      "acc": 0.9885243688402862,
+      "count": 29628,
+      "class_id": 4
+    },
+    "key": {
+      "acc": 0.9863579669473028,
+      "count": 25656,
+      "class_id": 5
+    },
+    "goal": {
+      "acc": 1.0,
+      "count": 30000,
+      "class_id": 8
+    },
+    "agent": {
+      "acc": 0.9828,
+      "count": 30000,
+      "class_id": 10
+    }
+  },
+  "macro_mean_acc": 0.9452964678585661
+}

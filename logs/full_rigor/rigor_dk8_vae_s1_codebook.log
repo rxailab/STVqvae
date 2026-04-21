@@ -1,0 +1,19 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/rigor_dk8_vae_s1_best_model.pt
+Env: MiniGrid-DoorKey-8x8-v0 (crafter=False)
+Codebook: None, Embed: 64
+Constructed VAE with 4096-dim latent space
+Traceback (most recent call last):
+  File "/home/xiar3/experiments/STVqvae/discrete_mbrl/analyze_codebook_usage.py", line 289, in <module>
+    main()
+  File "/home/xiar3/experiments/STVqvae/discrete_mbrl/analyze_codebook_usage.py", line 253, in main
+    n_latents = ae_model.n_latent_embeds
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1928, in __getattr__
+    raise AttributeError(
+AttributeError: 'AEModel' object has no attribute 'n_latent_embeds'

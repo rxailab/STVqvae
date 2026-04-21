@@ -29,8 +29,8 @@ sys.path.insert(0, parent_dir)
 sys.path.insert(0, os.path.dirname(__file__))
 
 from env_helpers import make_env, preprocess_obs, OBJECT_TO_IDX
-from model_construction import construct_ae_model, get_args
-from training_helpers import update_params
+from model_construction import construct_ae_model
+# from training_helpers import update_params  # unused
 
 IDX_TO_OBJECT = {v: k for k, v in OBJECT_TO_IDX.items()}
 N_CLASSES = 11  # 0..10
@@ -193,7 +193,7 @@ def main():
     parser.add_argument('--env_name', default='MiniGrid-LavaCrossingS9N1-v0')
     parser.add_argument('--ae_model_hash', default='ea136dc75d389f7b850959cd1f78eb6a')
     parser.add_argument('--ae_model_type', default='vqvae')
-    parser.add_argument('--ae_model_version', type=int, default=2)
+    parser.add_argument('--ae_model_version', type=str, default='2')
     parser.add_argument('--codebook_size', type=int, default=64)
     parser.add_argument('--embedding_dim', type=int, default=64)
     parser.add_argument('--filter_size', type=int, default=9)
@@ -201,17 +201,40 @@ def main():
     parser.add_argument('--probe_epochs', type=int, default=20)
     parser.add_argument('--probe_batch_size', type=int, default=256)
     parser.add_argument('--model_dir', default='..')
+    parser.add_argument('--model_path', default=None,
+                        help='Direct path to checkpoint .pt file. If set, overrides '
+                             'hash-based loading and reads env_name/version/etc from checkpoint.')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
 
+    # Load from checkpoint path (preferred) or hash-based lookup
+    if args.model_path is not None:
+        import types
+        print(f'Loading checkpoint: {args.model_path}')
+        ckpt = torch.load(args.model_path, map_location='cpu', weights_only=False)
+        margs = types.SimpleNamespace(**ckpt['args'])
+        # Override from checkpoint
+        args.env_name = margs.env_name
+        args.ae_model_version = str(getattr(margs, 'ae_model_version', args.ae_model_version))
+        args.codebook_size = margs.codebook_size
+        args.embedding_dim = margs.embedding_dim
+        args.filter_size = getattr(margs, 'filter_size', args.filter_size)
+        args.ae_model_type = getattr(margs, 'ae_model_type', 'vqvae')
+
     # Minimal extra attrs needed by construct_ae_model
-    args.load = True
-    args.e2e_loss = True   # so encode(return_quantized=True) works
+    args.load = False  # we load manually when model_path is set
+    args.e2e_loss = True
     args.use_amp = False
     args.ae_recon_loss = False
+    args.dead_code_threshold = getattr(args, 'dead_code_threshold', 0.0)
+    args.wandb = False
+    args.comet_ml = False
+    args.model_dir = getattr(args, 'model_dir', '..')
+    if args.model_path:
+        args.dead_code_threshold = getattr(margs, 'dead_code_threshold', 0.0)
 
     print(f'Environment : {args.env_name}')
-    print(f'VQVAE hash  : {args.ae_model_hash}')
+    print(f'Encoder     : v{args.ae_model_version}')
     print(f'Device      : {args.device}')
 
     env = make_env(args.env_name)
@@ -219,8 +242,25 @@ def main():
     sample_obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     sample_obs = preprocess_obs([sample_obs])
 
-    ae_model, _ = construct_ae_model(sample_obs.shape[1:], args,
-                                     latent_activation=True, load=True)
+    if args.model_path is not None:
+        # Build model directly to avoid construct_ae_model's many arg dependencies
+        from model_construction import make_ae
+        from shared.models.encoder_models import VQVAEModel
+        encoder, decoder = make_ae(
+            sample_obs.shape[1:], args.embedding_dim, args.filter_size,
+            version=args.ae_model_version)
+        ae_model = VQVAEModel(
+            sample_obs.shape[1:],
+            codebook_size=args.codebook_size,
+            embedding_dim=args.embedding_dim,
+            encoder=encoder, decoder=decoder,
+            commitment_cost=0.25, ema_decay=0.99,
+            dead_code_threshold=args.dead_code_threshold)
+        ae_model.load_state_dict(ckpt['ae_model_state_dict'])
+        print(f'Loaded weights from checkpoint')
+    else:
+        ae_model, _ = construct_ae_model(sample_obs.shape[1:], args,
+                                         latent_activation=True, load=True)
     ae_model = ae_model.to(args.device)
     for p in ae_model.parameters():
         p.requires_grad = False

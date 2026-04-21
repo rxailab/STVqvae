@@ -1,0 +1,8 @@
+{
+  "n_dead": 5,
+  "n_active": 251,
+  "codebook_size": 256,
+  "dead_fraction": 0.01953125,
+  "avg_purity": 0.889687191151894,
+  "class_code_count": {
+    

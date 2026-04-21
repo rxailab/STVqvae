@@ -1,0 +1,62 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading checkpoint: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/sweep_doorkey8_v6_s1_best_model.pt
+Environment : MiniGrid-DoorKey-8x8-v0
+Encoder     : v6
+Device      : cuda
+Loaded weights from checkpoint
+VQVAE: n_latent=64 (8×8), embed_dim=64
+
+Collecting 50000 frames with random policy...
+  Collected 5000/50000 frames
+  Collected 10000/50000 frames
+  Collected 15000/50000 frames
+  Collected 20000/50000 frames
+  Collected 25000/50000 frames
+  Collected 30000/50000 frames
+  Collected 35000/50000 frames
+  Collected 40000/50000 frames
+  Collected 45000/50000 frames
+  Collected 50000/50000 frames
+Collected: embeddings=(50000, 4096), labels=(50000, 64)
+
+Label distribution:
+  empty      (id=1): 1355799 (42.4%)
+  wall       (id=2): 1650000 (51.6%)
+  door       (id=4): 49725 (1.6%)
+  key        (id=5): 44476 (1.4%)
+  goal       (id=8): 50000 (1.6%)
+  agent      (id=10): 50000 (1.6%)
+
+Training linear probe: 64 -> 11 over 20 epochs
+  Epoch   1/20  loss=1.4909
+  Epoch   5/20  loss=0.8223
+  Epoch  10/20  loss=0.7235
+  Epoch  15/20  loss=0.6929
+  Epoch  20/20  loss=0.6781
+
+=== Probe Results ===
+Overall per-position accuracy: 67.7%
+
+Per-class accuracy:
+  empty      (id=1):   72.2%  (1355799 samples)
+  wall       (id=2):   64.8%  (1650000 samples)
+  door       (id=4):   73.6%  (49725 samples)
+  key        (id=5):   81.1%  (44476 samples)
+  goal       (id=8):    0.0%  (50000 samples)
+  agent      (id=10):   92.7%  (50000 samples)
+
+Confusion matrix (rows=true, cols=pred):
+              empty    wall    door     key    goal   agent
+empty        978760  376062     583     310       0      84
+wall         581288 1068536      56      51       0      69
+door           8029    3460   36620    1546       0      70
+key             869     254    7283   36070       0       0
+goal          12036   37964       0       0       0       0
+agent          2515     537     183     434       0   46331
+
+Probe saved to: ../models/MiniGrid-DoorKey-8x8-v0/semantic_probe_ea136dc7.pt

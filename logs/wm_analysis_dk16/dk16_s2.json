@@ -1,0 +1,114 @@
+{
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-16x16-v0/sweep_doorkey16_v6_s2_best_model.pt",
+  "encoder_version": "6",
+  "env_name": "MiniGrid-DoorKey-16x16-v0",
+  "probe_acc_per_class": {
+    "1": {
+      "acc": 0.3204094964158172,
+      "count": 3580593,
+      "name": "empty"
+    },
+    "2": {
+      "acc": 0.4759869863013699,
+      "count": 1460000,
+      "name": "wall"
+    },
+    "4": {
+      "acc": 0.99785,
+      "count": 20000,
+      "name": "door"
+    },
+    "5": {
+      "acc": 0.8554645231102179,
+      "count": 19407,
+      "name": "key"
+    },
+    "8": {
+      "acc": 1.0,
+      "count": 20000,
+      "name": "goal"
+    },
+    "10": {
+      "acc": 0.4615,
+      "count": 20000,
+      "name": "agent"
+    }
+  },
+  "wm_acc_per_class": {
+    "1": {
+      "acc": 0.4746588468551636,
+      "count": 895125,
+      "name": "empty"
+    },
+    "2": {
+      "acc": 0.6029616594314575,
+      "count": 365000,
+      "name": "wall"
+    },
+    "4": {
+      "acc": 0.14020000398159027,
+      "count": 5000,
+      "name": "door"
+    },
+    "5": {
+      "acc": 0.0012307692086324096,
+      "count": 4875,
+      "name": "key"
+    },
+    "8": {
+      "acc": 1.0,
+      "count": 5000,
+      "name": "goal"
+    },
+    "10": {
+      "acc": 0.0017999999690800905,
+      "count": 5000,
+      "name": "agent"
+    }
+  },
+  "scatter_data": [
+    {
+      "class": 1,
+      "name": "empty",
+      "probe_acc": 0.3204,
+      "wm_acc": 0.4747,
+      "count": 3580593
+    },
+    {
+      "class": 2,
+      "name": "wall",
+      "probe_acc": 0.476,
+      "wm_acc": 0.603,
+      "count": 1460000
+    },
+    {
+      "class": 4,
+      "name": "door",
+      "probe_acc": 0.9979,
+      "wm_acc": 0.1402,
+      "count": 20000
+    },
+    {
+      "class": 5,
+      "name": "key",
+      "probe_acc": 0.8555,
+      "wm_acc": 0.0012,
+      "count": 19407
+    },
+    {
+      "class": 8,
+      "name": "goal",
+      "probe_acc": 1.0,
+      "wm_acc": 1.0,
+      "count": 20000
+    },
+    {
+      "class": 10,
+      "name": "agent",
+      "probe_acc": 0.4615,
+      "wm_acc": 0.0018,
+      "count": 20000
+    }
+  ],
+  "pearson_r": 0.09901323167208624
+}
