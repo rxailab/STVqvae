@@ -1,0 +1,95 @@
+% ============================================================
+% checklist.tex --- NeurIPS 2026 Paper Checklist
+%
+% The full checklist text, justifications, and \answer{} macros
+% are provided by the neurips_2026 style file. Below is a
+% minimal stub covering each required question with the answers
+% our current manuscript supports. Revisit every line before
+% camera-ready and tighten any [TODO] entries.
+% ============================================================
+
+\section*{NeurIPS Paper Checklist}
+
+\begin{enumerate}
+
+  %% ----- Claims -----
+  \item \textbf{Claims.} Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} The abstract and \S1 state per-class probe/WM numbers that match Tables 2--5 exactly. The claim ``probe accuracy is necessary but not sufficient for representation usability in MBRL'' is supported by four experiments (\S4.2--\S4.6), with explicit caveats for the \texttt{goal} class and for the still-running v5dc seeds.
+
+  %% ----- Limitations -----
+  \item \textbf{Limitations.} Does the paper discuss the limitations of the work performed by the authors?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} \S6 (Limitations) enumerates environment diversity, world-model architecture, encoder family, probe-on-training-set, incomplete sweep, correlation statistical power, and scope of the negative result.
+
+  %% ----- Theory assumptions and proofs -----
+  \item \textbf{Theory assumptions and proofs.} For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof?\\
+  \textbf{Answer:} [N/A]\\
+  \textbf{Justification:} The paper is empirical; it contains no theorems or formal proofs.
+
+  %% ----- Experimental result reproducibility -----
+  \item \textbf{Experimental result reproducibility.} Does the paper fully disclose all the information needed to reproduce the main experimental results?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} \S4.1 specifies environments, encoder families, training budget, optimizer, and evaluation protocol; \S3.1--\S3.5 specifies architectures and loss terms. Full config hashes are provided in Appendix~A; the probe and multi-step-WM evaluation scripts (\texttt{analyze\_wm\_multistep.py}) are released.
+
+  %% ----- Open access to data and code -----
+  \item \textbf{Open access to data and code.} Does the paper provide open access to the data and code, with sufficient instructions to faithfully reproduce the main experimental results?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} All code (training, probes, multi-step WM evaluation) and per-checkpoint CSV logs will be released at the anonymized URL listed in the supplementary material. MiniGrid DoorKey is a public benchmark.
+
+  %% ----- Experimental setting / details -----
+  \item \textbf{Experimental setting / details.} Does the paper specify all the training and test details (e.g., data splits, hyperparameters, how they were chosen, type of optimizer, etc.) necessary to understand the results?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} \S4.1 lists seeds, PPO batch size, training horizon, encoder LR schedule, $\alpha_{\text{aux}}$, codebook size, and evaluation buffer size. Table~1 enumerates the experimental grid.
+
+  %% ----- Experiment statistical significance -----
+  \item \textbf{Experiment statistical significance.} Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} All numerical results are reported as mean~$\pm$~std across seeds ($N{=}5$ on DK-8, $N{=}3$ on DK-16), and the main dissociation claim is triangulated by three independent seeds agreeing to the decimal on the across-class Pearson correlation at DK-16 (\S4.6). \S6 discusses the small-$n$ noise on per-seed Pearson estimates.
+
+  %% ----- Experiments compute resources -----
+  \item \textbf{Experiments compute resources.} For each experiment, does the paper provide sufficient information on the computer resources (type of compute workers, memory, time of execution) needed to reproduce the experiments?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} \S7 (Broader Impact) reports the full experimental sweep at $\approx 110$ GPU-hours on a single NVIDIA RTX 4090, broken down by training vs.\ analysis cost.
+
+  %% ----- Code of ethics -----
+  \item \textbf{Code of ethics.} Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} The work uses only MiniGrid (public, non-human), involves no human subjects, no personally identifiable data, and no high-risk deployment setting.
+
+  %% ----- Broader impacts -----
+  \item \textbf{Broader impacts.} Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} \S7 addresses intended positive impact (safer representation-evaluation practice), risk of over-correction (abandoning probes entirely), and research-ecosystem risk (higher publication cost), with mitigations for each.
+
+  %% ----- Safeguards -----
+  \item \textbf{Safeguards.} Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse?\\
+  \textbf{Answer:} [N/A]\\
+  \textbf{Justification:} The released artifacts are a methodology critique and evaluation script for a toy gridworld RL benchmark; no models with plausible misuse potential are released.
+
+  %% ----- Licenses for existing assets -----
+  \item \textbf{Licenses for existing assets.} Are the creators or original owners of assets (e.g., code, data, models) used in the paper properly credited and are the license and terms of use explicitly mentioned and properly respected?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} MiniGrid (Apache 2.0) is cited. PPO implementation and VQ-VAE baseline code derive from public repositories cited in Appendix~A, and all license terms are honored.
+
+  %% ----- New assets -----
+  \item \textbf{New assets.} Are new assets introduced in the paper well documented and is the documentation provided alongside the assets?\\
+  \textbf{Answer:} [Yes]\\
+  \textbf{Justification:} The new asset is the per-class $k$-step WM evaluation script (\texttt{analyze\_wm\_multistep.py}). It is released with a README documenting CLI flags, input/output formats, and a minimal reproduction recipe.
+
+  %% ----- Crowdsourcing and research with human subjects -----
+  \item \textbf{Crowdsourcing and research with human subjects.} For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)?\\
+  \textbf{Answer:} [N/A]\\
+  \textbf{Justification:} No crowdsourcing or human-subject research.
+
+  %% ----- IRB approvals -----
+  \item \textbf{Institutional Review Board (IRB) approvals or equivalent for research with human subjects.} Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained?\\
+  \textbf{Answer:} [N/A]\\
+  \textbf{Justification:} No human-subject research.
+
+  %% ----- LLM usage -----
+  \item \textbf{Declaration of LLM usage.} Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research?\\
+  \textbf{Answer:} [N/A]\\
+  \textbf{Justification:} LLMs are not part of the method. Any LLM-assisted editing of manuscript prose falls under standard writing assistance and is not a core methodological contribution.
+
+\end{enumerate}

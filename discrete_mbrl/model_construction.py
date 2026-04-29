@@ -1309,7 +1309,21 @@ def construct_ae_model(input_dim, args, load=True, latent_activation=False):
         encoder_type = 'dense' if (len(encoder_out_shape) == 1) else 'cnn'
 
     if args.ae_model_type in CONTINUOUS_ENCODER_TYPES:
-        if args.ae_model_type in ('ae', 'vae', 'fta_ae'):
+        if args.ae_model_type == 'vae_spatial':
+            from shared.models.encoder_models import AEModelSpatial
+            args_update(args, 'codebook_size', None)
+            model = AEModelSpatial(
+                input_dim, embedding_dim=args.embedding_dim,
+                encoder=encoder, decoder=decoder, stochastic=True,
+            )
+            args_update(args, 'final_latent_dim', model.latent_dim)
+            print(f'Constructed Spatial VAE with latent {model.encoder_out_shape} '
+                  f'({model.n_latent_embeds} tokens × {model.embedding_dim} dims)')
+            TrainerClass = VAETrainer
+            trainer = TrainerClass(model, lr=args.learning_rate, log_freq=-1,
+                                   grad_clip=args.ae_grad_clip)
+
+        elif args.ae_model_type in ('ae', 'vae', 'fta_ae'):
             stochastic = args.ae_model_type == 'vae'
             fta = args.ae_model_type == 'fta_ae'
             fta_params = {

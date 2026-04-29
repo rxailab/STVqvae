@@ -193,6 +193,88 @@ class AEModel(nn.Module):
     return x_hat
 
 
+class AEModelSpatial(nn.Module):
+  """Continuous encoder that preserves spatial (D, H, W) structure.
+  When stochastic=True, this is a convolutional VAE — per-position mean/std
+  via 1×1 convs, so there is no global FC bottleneck. Used as an apples-to-apples
+  positive control for probe↔WM dissociation studies on VQ-VAE."""
+
+  def __init__(self, obs_dim, embedding_dim=64, encoder=None, decoder=None,
+               stochastic=False):
+    super().__init__()
+    self.encoder_type = 'vae_spatial' if stochastic else 'ae_spatial'
+    self.stochastic = stochastic
+    self.encoder = encoder if encoder else create_encoder(obs_dim)
+
+    test_input = torch.ones([1] + list(obs_dim), dtype=torch.float32)
+    test_out = self.encoder(test_input)
+    assert test_out.dim() == 4, \
+      f"AEModelSpatial expects 4D encoder output (B, D, H, W), got {test_out.shape}"
+    _, D, H, W = test_out.shape
+    self.encoder_out_shape = (D, H, W)
+    self.n_latent_embeds = H * W           # for analysis compat (per-token count)
+    self.embedding_dim = D                  # per-token dim
+    self.latent_dim = D * H * W             # flat total
+
+    self.mean_conv = nn.Conv2d(D, D, 1)
+    if self.stochastic:
+      self.std_conv = nn.Conv2d(D, D, 1)
+
+    self.decoder = decoder if decoder else create_decoder(obs_dim)
+
+  def get_encoder(self):
+    # Return a callable that produces the flat latent (deterministic mean).
+    encoder = nn.Sequential(
+      self.encoder,
+      self.mean_conv,
+      ReshapeLayer(-1, self.latent_dim),
+    )
+    encoder.encoder_type = self.encoder_type
+    encoder.encoder_out_shape = self.encoder_out_shape
+    encoder.latent_dim = self.latent_dim
+    return encoder
+
+  def encode(self, x, return_all=False, **kwargs):
+    h = self.encoder(x)                    # (B, D, H, W)
+    mean_sp = self.mean_conv(h)             # (B, D, H, W)
+    mean_flat = mean_sp.reshape(x.shape[0], -1)
+
+    if not self.stochastic:
+      if return_all:
+        return mean_flat, mean_flat, None
+      return mean_flat
+
+    # Parameterize std as exp(log_std / 2) for stability; output raw value from
+    # std_conv is the log-variance pre-scale. We keep sigma = exp(s) here for
+    # direct compatibility with the existing VAETrainer which expects positive
+    # sigma and computes 0.5 * (1 + log(sigma**2) - mu**2 - sigma**2).
+    log_std_sp = self.std_conv(h)           # (B, D, H, W)
+    # Clamp to keep KL term numerically stable (std in [exp(-5), exp(2)])
+    log_std_sp = torch.clamp(log_std_sp, min=-5.0, max=2.0)
+    std_sp = log_std_sp.exp()
+    eps = torch.randn_like(std_sp)
+    z_sp = mean_sp + std_sp * eps
+    z_flat   = z_sp.reshape(x.shape[0], -1)
+    std_flat = std_sp.reshape(x.shape[0], -1)
+
+    if return_all:
+      return z_flat, mean_flat, std_flat
+    return z_flat
+
+  def decode(self, z):
+    # Accept flat or spatial latent
+    if z.dim() == 2:
+      z = z.reshape(z.shape[0], *self.encoder_out_shape)
+    return self.decoder(z)
+
+  def forward(self, x, return_all=False):
+    z, mean, std = self.encode(x, return_all=True)
+    x_hat = self.decode(z)
+    if return_all:
+      return x_hat, mean, std
+    return x_hat
+
+
 class FlattenModel(nn.Module):
   def __init__(self, obs_dim):
     super().__init__()

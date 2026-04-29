@@ -1,0 +1,52 @@
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Loading: /home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/sweep_dk8_v5dc_s5_best_model.pt
+Transition model (discrete) loaded (2,337,794 params)
+Encoder vqvae v5, ae_type=vqvae, trans_type=discrete
+
+Running semantic probe (20000 frames)...
+/home/xiar3/experiments/miniforge3/envs/stvqvae/lib/python3.11/site-packages/sklearn/linear_model/_logistic.py:406: ConvergenceWarning: lbfgs failed to converge after 300 iteration(s) (status=1):
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+Increase the number of iterations to improve the convergence (max_iter=300).
+You might also want to scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+Please also refer to the documentation for alternative solver options:
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression
+  n_iter_i = _check_optimize_result(
+
+Multi-step WM rollouts: 500 × up to 10 steps
+  rollouts: 50/500
+  rollouts: 100/500
+  rollouts: 150/500
+  rollouts: 200/500
+  rollouts: 250/500
+  rollouts: 300/500
+  rollouts: 350/500
+  rollouts: 400/500
+  rollouts: 450/500
+  rollouts: 500/500
+
+================================================================================
+MULTI-STEP PER-CLASS ACCURACY
+================================================================================
+Class           Probe   WM-1step   WM-3step   WM-5step  WM-10step     Count
+---------------------------------------------------------------------------
+  empty        24.2%      39.1%      40.2%      40.2%      39.5%   542,581
+  wall         25.0%      79.8%      80.3%      80.7%      80.6%   660,000
+  door         90.6%       1.8%       2.6%       2.4%       3.2%    19,767
+  key          51.6%       2.4%       0.2%       0.2%       0.6%    17,652
+  goal         74.5%      97.8%     100.0%      99.8%     100.0%    20,000
+  agent        33.5%       0.6%       0.6%       2.8%       6.8%    20,000
+
+Pearson r (probe vs WM-k-step):
+  k= 1: -0.088
+  k= 3: -0.079
+  k= 5: -0.089
+  k=10: -0.092
+
+Saved to /home/xiar3/experiments/STVqvae/logs/wm_multistep/sweep_dk8_v5dc_s5.json

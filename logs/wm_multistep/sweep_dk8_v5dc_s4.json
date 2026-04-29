@@ -1,0 +1,243 @@
+{
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0/sweep_dk8_v5dc_s4_best_model.pt",
+  "encoder_version": "5",
+  "ae_model_type": "vqvae",
+  "trans_model_type": "discrete",
+  "env_name": "MiniGrid-DoorKey-8x8-v0",
+  "horizons": [
+    1,
+    3,
+    5,
+    10
+  ],
+  "probe_acc_per_class": {
+    "1": {
+      "acc": 0.23812835250455608,
+      "count": 542132,
+      "name": "empty"
+    },
+    "2": {
+      "acc": 0.7064363636363636,
+      "count": 660000,
+      "name": "wall"
+    },
+    "4": {
+      "acc": 0.900503018108652,
+      "count": 19880,
+      "name": "door"
+    },
+    "5": {
+      "acc": 0.5730486991327551,
+      "count": 17988,
+      "name": "key"
+    },
+    "8": {
+      "acc": 0.99725,
+      "count": 20000,
+      "name": "goal"
+    },
+    "10": {
+      "acc": 0.3156,
+      "count": 20000,
+      "name": "agent"
+    }
+  },
+  "wm_acc_per_class_per_horizon": {
+    "1": {
+      "1": {
+        "acc": 0.2562962962962963,
+        "count": 13500,
+        "name": "empty"
+      },
+      "2": {
+        "acc": 0.7126666666666667,
+        "count": 16500,
+        "name": "wall"
+      },
+      "4": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "door"
+      },
+      "5": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "key"
+      },
+      "8": {
+        "acc": 0.736,
+        "count": 500,
+        "name": "goal"
+      },
+      "10": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "agent"
+      }
+    },
+    "3": {
+      "1": {
+        "acc": 0.2374814814814815,
+        "count": 13500,
+        "name": "empty"
+      },
+      "2": {
+        "acc": 0.7152727272727273,
+        "count": 16500,
+        "name": "wall"
+      },
+      "4": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "door"
+      },
+      "5": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "key"
+      },
+      "8": {
+        "acc": 0.508,
+        "count": 500,
+        "name": "goal"
+      },
+      "10": {
+        "acc": 0.008,
+        "count": 500,
+        "name": "agent"
+      }
+    },
+    "5": {
+      "1": {
+        "acc": 0.22837037037037036,
+        "count": 13500,
+        "name": "empty"
+      },
+      "2": {
+        "acc": 0.7145454545454546,
+        "count": 16500,
+        "name": "wall"
+      },
+      "4": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "door"
+      },
+      "5": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "key"
+      },
+      "8": {
+        "acc": 0.78,
+        "count": 500,
+        "name": "goal"
+      },
+      "10": {
+        "acc": 0.016,
+        "count": 500,
+        "name": "agent"
+      }
+    },
+    "10": {
+      "1": {
+        "acc": 0.23148148148148148,
+        "count": 13500,
+        "name": "empty"
+      },
+      "2": {
+        "acc": 0.7152727272727273,
+        "count": 16500,
+        "name": "wall"
+      },
+      "4": {
+        "acc": 0.0,
+        "count": 500,
+        "name": "door"
+      },
+      "5": {
+        "acc": 0.002,
+        "count": 500,
+        "name": "key"
+      },
+      "8": {
+        "acc": 0.72,
+        "count": 500,
+        "name": "goal"
+      },
+      "10": {
+        "acc": 0.034,
+        "count": 500,
+        "name": "agent"
+      }
+    }
+  },
+  "rows": [
+    {
+      "class": 1,
+      "name": "empty",
+      "probe_acc": 0.2381,
+      "count": 542132,
+      "wm_1step": 0.2563,
+      "wm_3step": 0.2375,
+      "wm_5step": 0.2284,
+      "wm_10step": 0.2315
+    },
+    {
+      "class": 2,
+      "name": "wall",
+      "probe_acc": 0.7064,
+      "count": 660000,
+      "wm_1step": 0.7127,
+      "wm_3step": 0.7153,
+      "wm_5step": 0.7145,
+      "wm_10step": 0.7153
+    },
+    {
+      "class": 4,
+      "name": "door",
+      "probe_acc": 0.9005,
+      "count": 19880,
+      "wm_1step": 0.0,
+      "wm_3step": 0.0,
+      "wm_5step": 0.0,
+      "wm_10step": 0.0
+    },
+    {
+      "class": 5,
+      "name": "key",
+      "probe_acc": 0.573,
+      "count": 17988,
+      "wm_1step": 0.0,
+      "wm_3step": 0.0,
+      "wm_5step": 0.0,
+      "wm_10step": 0.002
+    },
+    {
+      "class": 8,
+      "name": "goal",
+      "probe_acc": 0.9972,
+      "count": 20000,
+      "wm_1step": 0.736,
+      "wm_3step": 0.508,
+      "wm_5step": 0.78,
+      "wm_10step": 0.72
+    },
+    {
+      "class": 10,
+      "name": "agent",
+      "probe_acc": 0.3156,
+      "count": 20000,
+      "wm_1step": 0.0,
+      "wm_3step": 0.008,
+      "wm_5step": 0.016,
+      "wm_10step": 0.034
+    }
+  ],
+  "pearson_r_per_horizon": {
+    "1": 0.4379556629998867,
+    "3": 0.3369279859004286,
+    "5": 0.4659637533925838,
+    "10": 0.43572322036048206
+  }
+}
