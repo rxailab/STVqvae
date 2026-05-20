@@ -971,7 +971,8 @@ st.markdown(
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_progress, tab_sweep, tab_phases, tab_rigor, tab_summary, tab_machine, tab_train, tab_exp = st.tabs([
+tab_slurm, tab_progress, tab_sweep, tab_phases, tab_rigor, tab_summary, tab_machine, tab_train, tab_exp = st.tabs([
+    "SLURM Jobs",
     "Live Progress",
     "Multi-Seed Sweep",
     "Phases 6–8",
@@ -981,6 +982,148 @@ tab_progress, tab_sweep, tab_phases, tab_rigor, tab_summary, tab_machine, tab_tr
     "Training Progress",
     "Experiments Log",
 ])
+
+
+# ===== TAB SLURM — PHASE PROGRESS ==========================================
+with tab_slurm:
+    import subprocess as _sub_s
+    import re as _re_s
+
+    section_header("SLURM Queue & Phase Progress")
+
+    # ── Current squeue ─────────────────────────────────────────────────────
+    try:
+        sq = _sub_s.check_output(
+            ["squeue", "-u", "xiar3",
+             "-o", "%.10i %.9P %.16j %.8T %.10M %.10l %.6D %R"],
+            text=True, stderr=_sub_s.DEVNULL)
+    except Exception as e:
+        sq = f"squeue failed: {e}"
+
+    st.markdown("**`squeue -u xiar3`**")
+    st.code(sq, language="text")
+
+    # ── Per-phase progress cards ───────────────────────────────────────────
+    # Each phase: count produced artifacts vs expected total. Idempotent
+    # skip-guards in the orchestrator scripts mean file-count is accurate.
+    DK8 = REPO / "discrete_mbrl/model_free/models/MiniGrid-DoorKey-8x8-v0"
+    PHASE_LOG = REPO / "logs"
+
+    def _count(glob_pattern, base):
+        return len(list(Path(base).glob(glob_pattern))) if Path(base).exists() else 0
+
+    # For Phase BB cross-env training: count produced phaseA + phaseN JSONs.
+    bb_envs = ["empty8", "fourrooms", "lavaS9N2"]
+    bb_lambdas = ["0.0", "0.5", "2.0", "10.0"]
+    bb_done = sum(
+        1 for env in bb_envs for lam in bb_lambdas
+        if (PHASE_LOG / "phaseBB" / f"phaseA_{env}_vae_s1_lam{lam}.json").exists()
+        and (PHASE_LOG / "phaseBB" / f"phaseN_{env}_vae_s1_lam{lam}.json").exists()
+    )
+    bb_total = len(bb_envs) * len(bb_lambdas)
+
+    # Phase T (Dyna): count saved dyna_*.pt ckpts. Goal seeds 1..15 x 4 lam x 2 modes.
+    t_dyna_dir = DK8 / "phaseT"
+    t_total_seeds = 15
+    t_total_cells = 4 * 2 * t_total_seeds  # lam x mode x seed
+    t_done_cells = _count("dyna_*.pt", t_dyna_dir)
+    t_done_n2 = sum(
+        1 for lam in ["0.0", "0.5", "2.0", "10.0"] for mode in ["none", "oracle"]
+        for s in [1, 2]
+        if (t_dyna_dir / f"dyna_lam{lam}_{mode}_s{s}.pt").exists())
+    t_done_n5 = sum(
+        1 for lam in ["0.0", "0.5", "2.0", "10.0"] for mode in ["none", "oracle"]
+        for s in range(1, 6)
+        if (t_dyna_dir / f"dyna_lam{lam}_{mode}_s{s}.pt").exists())
+
+    # Phase HO (held-out probe): per-ckpt JSONs in logs/phaseHO.
+    ho_done = _count("holdout_*.json", PHASE_LOG / "phaseHO")
+    ho_total = 100  # phaseA_summary.csv unique stubs
+
+    # Phase RR (recompute reward): 12 eval JSONs.
+    rr_done = _count("eval_*.json", PHASE_LOG / "phaseRR")
+    rr_total = 12
+
+    # Phase TX (transformer architectures): 4 encoders + 16 cell JSONs.
+    tx_dir = DK8 / "phaseTX"
+    tx_enc_total = 4
+    tx_enc_done = sum(
+        1 for r in ["phaseTX_enc_s1", "phaseTX_enc_s2",
+                    "phaseTX_dec_s1", "phaseTX_dec_s2"]
+        if (DK8 / f"{r}_best_model.pt").exists())
+    tx_cell_total = 4 * 4  # 4 encoders x 4 lambdas
+    tx_cell_done = sum(
+        1 for label in ["tx_enc_s1", "tx_enc_s2", "tx_dec_s1", "tx_dec_s2"]
+        for lam in bb_lambdas
+        if (PHASE_LOG / "phaseTX" / f"phaseA_{label}_lam{lam}.json").exists()
+        and (PHASE_LOG / "phaseTX" / f"phaseN_{label}_lam{lam}.json").exists()
+    )
+
+    st.markdown("---")
+    st.markdown("### Per-phase progress")
+
+    def _row(label, done, total, hint, *, warn=False, fail=False):
+        pct = (done / total) if total else 0.0
+        if fail:
+            badge = "❌ failed"
+        elif warn:
+            badge = "⚠ partial"
+        elif done == total and total > 0:
+            badge = "✅ done"
+        elif done > 0:
+            badge = "🔄 running"
+        else:
+            badge = "⏳ pending"
+        st.markdown(f"**{label}** {badge} — {done}/{total} ({pct*100:.0f}%) — {hint}")
+        st.progress(min(pct, 1.0))
+
+    _row("Phase BB — cross-env (Empty/FourRooms/LavaS9N2)",
+         bb_done, bb_total,
+         "VAE encoder train + λ-sweep on 3 new MiniGrid envs (12 cells)")
+
+    _row("Phase T (N=2 baseline) — Dyna seeds 1–2",
+         t_done_n2, 16,
+         "original recipe table data; complete")
+
+    _row("Phase T-extra — Dyna seeds 3–5  (→ N=5)",
+         t_done_n5 - t_done_n2, 24,
+         "expansion to N=5, addresses reviewer #5 first round")
+
+    _row("Phase T-more — Dyna seeds 6–15  (→ N=15)",
+         max(0, t_done_cells - t_done_n5), 80,
+         "final expansion to N=15 per (λ, mode)")
+
+    _row("Phase HO — held-out probe (100 ckpts)",
+         ho_done, ho_total,
+         "addresses reviewer #6: probe train/test split")
+
+    _row("Phase RR — recompute reward (12 ckpts)",
+         rr_done, rr_total,
+         "addresses reviewer #7; first run failed (state_dict mismatch)",
+         fail=(rr_done == 0))
+
+    _row("Phase TX — transformer encoders trained",
+         tx_enc_done, tx_enc_total,
+         "VQ-VAE + transformer-T (encoder-decoder ×2 + decoder-only ×2)")
+
+    _row("Phase TX — λ-sweep cells produced",
+         tx_cell_done, tx_cell_total,
+         "Phase A + Phase N JSONs per (encoder, λ)")
+
+    st.markdown("---")
+    st.markdown("### Recent SLURM job summary (last 24h)")
+    try:
+        sa = _sub_s.check_output(
+            ["sacct", "-u", "xiar3", "-S", "now-24hours",
+             "-o", "JobID,JobName,State,ExitCode,Elapsed,End",
+             "-n", "-X"],
+            text=True, stderr=_sub_s.DEVNULL)
+        # Filter only main jobs (drop .batch/.extern)
+        lines = [l for l in sa.splitlines()
+                 if l.strip() and ".batch" not in l and ".extern" not in l]
+        st.code("\n".join(lines[-30:]), language="text")
+    except Exception as e:
+        st.warning(f"sacct unavailable: {e}")
 
 
 # ===== TAB 0 — LIVE EXPERIMENT PROGRESS ===================================

@@ -434,6 +434,59 @@ def add_model_args(parser):
         help='How context features are merged with quantized codes in local_ctx_vqvae: '
              '"concat" (1x1 conv merge, default) or "film" (scale/shift).')
 
+    # Action-diversity injection for online WM training (Phase III, next paper).
+    # With probability `explore_random_prob`, replace the policy action with a
+    # uniform random action during rollout collection. Keeps action diversity in
+    # the WM training buffer even as PPO converges. PPO becomes mildly off-policy;
+    # for small probs (<= 0.2) it remains stable in practice.
+    parser.add_argument(
+        '--explore_random_prob', type=float, default=0.0,
+        help='With this prob, replace policy action with uniform random in '
+             'rollouts. 0 = §4 default behaviour. 0.1-0.2 recommended.')
+    # State-coverage injection (Phase III', next paper). At each env episode
+    # reset, with prob `random_episode_prob` mark the whole next episode as
+    # "random" — uniform random actions until done. Diversifies the rollout
+    # state distribution at the trajectory level (the step-level
+    # explore_random_prob only briefly diverges before the policy resumes).
+    parser.add_argument(
+        '--random_episode_prob', type=float, default=0.0,
+        help='At each env reset, with this prob run the next episode under '
+             'uniform random actions instead of policy. 0 = off, 0.5 = half '
+             'random episodes (recommended starting point).')
+    # Warmup: delay action injection until the policy has had time to settle.
+    # Tests whether bimodality is caused by destabilising early training.
+    parser.add_argument(
+        '--explore_warmup_steps', type=int, default=0,
+        help='Number of env steps before explore_random_prob / '
+             'random_episode_prob start firing. 0 = active from step 0 '
+             '(default). 1000000 = 1M-step warmup typical.')
+    # Phase VIII-B: decouple encoder from PPO gradient flow. When enabled, the
+    # PPO policy/value loss sees a detached encoder output (cannot update the
+    # encoder); only the WM aux loss updates the encoder. Tests whether the
+    # joint encoder/WM bimodality is caused by PPO pulling the encoder away
+    # from WM-favorable representations.
+    parser.add_argument(
+        '--ppo_stop_grad_encoder', action='store_true',
+        help='Stop gradient from PPO policy/value loss to the encoder; only '
+             'the WM aux loss can update the encoder. Default off.')
+    # Phase VIII-C: two-buffer architecture. Pre-collect a static
+    # random-action transition buffer; do extra WM-only gradient updates on
+    # that buffer in addition to the PPO+WM-aux joint update. Encoder gets
+    # gradient from both (PPO + WM-on-random-data). Tests whether the
+    # bimodality can be eliminated by giving WM its own broad-coverage data
+    # without disturbing the PPO rollout.
+    parser.add_argument(
+        '--random_wm_buffer_eps', type=int, default=0,
+        help='Number of random-action episodes to pre-collect at training '
+             'start. 0 = disabled (default). 600 = Cell A buffer size.')
+    parser.add_argument(
+        '--random_wm_per_update', type=int, default=0,
+        help='WM-only gradient steps per PPO update, drawn from the random '
+             'buffer. 0 = disabled. 1 = recommended.')
+    parser.add_argument(
+        '--random_wm_batch_size', type=int, default=256,
+        help='Minibatch size for the WM-only updates.')
+
     parser.set_defaults(vq_trans_1d_conv=False, vq_trans_state_snap=False)
 
 

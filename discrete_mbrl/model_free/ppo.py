@@ -76,6 +76,7 @@ class PPOTrainer():
       target_ae=None, trans_model=None, wm_aux_coef=0.0,
       sem_head=None, sem_aux_coef=0.0, sem_aux_start_reward=0.0, sem_use_class_weights=True,
       sem_focal_gamma=0.0, sem_pre_vq=False, sem_class_weight_power=1.0,
+      ppo_stop_grad_encoder=False,
     ):
     self.n_acts = env.action_space.n
     self.policy = policy
@@ -102,6 +103,7 @@ class PPOTrainer():
     self.sem_aux_active = (sem_aux_start_reward <= 0)  # active immediately if no gate
     self.sem_use_class_weights = sem_use_class_weights  # use inverse-freq weighting
     self.sem_focal_gamma = sem_focal_gamma  # focal loss gamma (0 = standard CE)
+    self.ppo_stop_grad_encoder = ppo_stop_grad_encoder  # detach states for PPO; only WM aux updates encoder
     self.sem_pre_vq = sem_pre_vq        # apply sem loss to pre-VQ encoder output (direct grad)
     self.sem_class_weight_power = sem_class_weight_power  # 1.0=inv-freq, 0.5=sqrt, 0=none
     self.sem_class_weights = None       # computed lazily from first batch
@@ -230,14 +232,22 @@ class PPOTrainer():
         # Calculate new action probabilities and values for the epoch.
         # For VQ-VAE e2e: use return_quantized so straight-through grads reach encoder.
         # For other models: use return_one_hot (VAE/AE use continuous encode anyway).
+        # Phase VIII-B: when ppo_stop_grad_encoder is set, the encoded states are
+        # detached for policy/value branches. The WM aux loss below re-encodes
+        # separately with gradient flow → only WM updates the encoder.
         if self.e2e_loss:
             is_vqvae = hasattr(self.ae, 'quantizer') and not getattr(self.ae, 'quantized_enc', False)
             if is_vqvae:
                 minibatch['states'] = self.ae.encode(minibatch['obs'], return_quantized=True)
             else:
                 minibatch['states'] = self.ae.encode(minibatch['obs'], return_one_hot=True)
-        new_values = self.critic(minibatch['states'])
-        new_act_probs = F.softmax(self.policy(minibatch['states']), dim=-1)
+        # Detached version for policy / critic if stop_grad is enabled
+        if getattr(self, 'ppo_stop_grad_encoder', False) and self.e2e_loss:
+            states_for_ppo = minibatch['states'].detach()
+        else:
+            states_for_ppo = minibatch['states']
+        new_values = self.critic(states_for_ppo)
+        new_act_probs = F.softmax(self.policy(states_for_ppo), dim=-1)
         policy_entropy = Categorical(probs=new_act_probs).entropy()
         new_act_probs = new_act_probs.gather(1, minibatch['acts'])
         new_act_probs = new_act_probs.squeeze(1)
@@ -382,3 +392,37 @@ class PPOTrainer():
     if self.sem_head is not None and self.sem_aux_coef > 0:
       result['sem_aux_loss'] = sem_aux_loss_val
     return result
+
+  def train_wm_only(self, obs, acts, next_obs):
+    """Phase VIII-C: WM-only gradient update on a separate random-action
+    batch. Updates encoder + trans_model (via the same optimizer) using ONLY
+    the WM aux loss — no policy/value gradient flows here.
+
+    obs:      (B, C, H, W) float tensor on self.device
+    acts:     (B,) int64 tensor on self.device
+    next_obs: (B, C, H, W) float tensor on self.device
+
+    Returns: scalar WM aux loss (float).
+    """
+    if self.trans_model is None or self.wm_aux_coef <= 0 or not self.e2e_loss:
+      return 0.0
+    # Encode current obs WITH gradient → encoder is updated by WM aux.
+    is_vqvae = hasattr(self.ae, 'quantizer') and not getattr(self.ae, 'quantized_enc', False)
+    if is_vqvae:
+      cont_states = self.ae.encode(obs, return_quantized=True)
+    else:
+      cont_states = self.ae.encode(obs, return_one_hot=True)
+    # Next-state indices (no grad needed for targets)
+    with torch.no_grad():
+      next_indices = self.ae.encode(next_obs)
+    pred_logits, _, _ = self.trans_model.forward_from_continuous(
+      cont_states, acts, return_logits=True)
+    wm_aux_loss = F.cross_entropy(pred_logits, next_indices, reduction='mean')
+    # Apply same coefficient as the PPO-time aux loss for comparability
+    loss = self.wm_aux_coef * wm_aux_loss
+    self.optimizer.zero_grad()
+    loss.backward()
+    if self.max_grad_norm > 0:
+      torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+    self.optimizer.step()
+    return float(wm_aux_loss.item())

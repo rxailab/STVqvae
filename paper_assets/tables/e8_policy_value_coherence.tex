@@ -1,0 +1,23 @@
+% E8 -- policy/value coherence on (z*_k, z_hat_k) pairs.
+% 13 checkpoints with a saved transition model; trained PPO policy + value head
+% applied directly to free-running WM rollouts under the trained policy.
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l l c c c c c c c c}
+\hline
+env & enc & $N$ & ep~len & succ & $k$ & action\_match & KL~median & value\_corr & $\bar V(z^\star) / \bar V(\hat z)$ \\
+\hline
+DK-8  & v6  & 2 & 121 & 43\% & 1  & $+0.43\pm0.21$ & $+1.04\pm1.04$ & $\mathbf{-0.42\pm0.18}$ & $0.43 / 0.46$ \\
+DK-8  & v6  & 2 & 121 & 43\% & 10 & $+0.44\pm0.38$ & $+1.54\pm1.80$ & $-0.10\pm0.07$ & $0.43 / 0.44$ \\
+DK-8  & vae & 5 & 98  & 57\% & 1  & $+0.29\pm0.19$ & $+4.79\pm4.29$ & $-0.06\pm0.18$ & $0.57 / 0.58$ \\
+DK-8  & vae & 5 & 98  & 57\% & 10 & $+0.33\pm0.22$ & $+4.74\pm4.76$ & $-0.18\pm0.19$ & $0.57 / 0.57$ \\
+\hline
+DK-16$^\dagger$ & v6   & 3 & 200 & 0\% & 1 & $+0.72\pm0.25$ & $+0.01\pm0.02$ & $+0.005$ & $0.00 / 0.00$ \\
+DK-16$^\dagger$ & v5dc & 3 & 200 & 0\% & 1 & $+0.18\pm0.10$ & $+1.01\pm0.74$ & $+0.10$  & $0.01 / 0.00$ \\
+\hline
+\end{tabular}
+\caption{Policy and value coherence between the encoder's true latent $z^\star_k$ and the world model's predicted $\hat z_k$ (E8). The trained PPO actor and critic heads from each checkpoint are applied directly to both inputs from a free-running rollout under the trained policy. \textbf{action\_match}: top-1 agreement rate between $\arg\max\pi(z^\star_k)$ and $\arg\max\pi(\hat z_k)$ ($1/7\approx 0.14$ random baseline). \textbf{KL median}: per-rollout median of $\mathrm{KL}(\pi(\hat z_k) \,\|\, \pi(z^\star_k))$. \textbf{value\_corr}: Pearson $r$ between $V(\hat z_k)$ and $V(z^\star_k)$ across rollouts. On the two cells where the policy actually solves the task (DK-8 v6, DK-8 vae), action\_match sits at $0.29$--$0.44$ across all horizons and value\_corr is near zero or negative ($-0.42$ at $k{=}1$ for v6); the mean values $\bar V$ agree on each row but the per-rollout ranking does not. $^\dagger$On DK-16 both policies fail to converge in the 8M-step training budget; their action distributions collapse to a default action and $V \approx 0$ everywhere, so the apparent ``coherence'' on those rows is a degenerate floor (consistent with the ``policy has not converged'' caveat in \S4.6).}
+\label{tab:e8-coherence}
+\end{table}

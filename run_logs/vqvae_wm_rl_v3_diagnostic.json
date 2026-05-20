@@ -1,0 +1,38 @@
+{
+  "env_name": "MiniGrid-LavaCrossingS9N1-v0",
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-LavaCrossingS9N1-v0/vqvae_preinit_snapback_ppo_best_model.pt",
+  "trans_model_hash": "2001523b4a77386bf05b84a00c2f80de",
+  "n_episodes": 25,
+  "max_steps": 500,
+  "policy_deterministic": true,
+  "horizons": {
+    "1": {
+      "segments": 355,
+      "teacher_forced_state_loss": 474.9271545410156,
+      "teacher_forced_state_acc": 0.018848896026611328,
+      "open_loop_state_loss": 474.9271545410156,
+      "open_loop_state_acc": 0.018848896026611328
+    },
+    "3": {
+      "segments": 305,
+      "teacher_forced_state_loss": 484.7484436035156,
+      "teacher_forced_state_acc": 0.020333267748355865,
+      "open_loop_state_loss": 2538.920166015625,
+      "open_loop_state_acc": 0.010443231090903282
+    },
+    "5": {
+      "segments": 255,
+      "teacher_forced_state_loss": 483.9420471191406,
+      "teacher_forced_state_acc": 0.021215202286839485,
+      "open_loop_state_loss": 3821.505615234375,
+      "open_loop_state_acc": 0.010990075767040253
+    },
+    "10": {
+      "segments": 130,
+      "teacher_forced_state_loss": 488.3735656738281,
+      "teacher_forced_state_acc": 0.02151946723461151,
+      "open_loop_state_loss": 4874.16162109375,
+      "open_loop_state_acc": 0.007407407741993666
+    }
+  }
+}

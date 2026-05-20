@@ -356,6 +356,7 @@ def train(args, encoder_model=None):
         sem_focal_gamma=getattr(args, 'sem_focal_gamma', 0.0),
         sem_pre_vq=getattr(args, 'sem_pre_vq', False),
         sem_class_weight_power=getattr(args, 'sem_class_weight_power', 1.0),
+        ppo_stop_grad_encoder=getattr(args, 'ppo_stop_grad_encoder', False),
     )
 
     replay_buffer = ReplayBuffer(args.replay_size) if args.ae_er_train else None
@@ -389,6 +390,22 @@ def train(args, encoder_model=None):
     if use_vec_env:
         vec_env = make_vec_env(args.env_name, num_envs, max_steps=args.env_max_steps)
         curr_obs_np, _ = vec_env.reset()
+        # Phase III' (next paper): per-env "random episode" flag. When True the
+        # whole current episode runs under uniform random actions; resampled at
+        # each episode boundary. Diversifies the WM training state distribution.
+        # Phase VII: warmup gate — both injection mechanisms suppressed until
+        # `step` exceeds explore_warmup_steps. Tests whether early-training
+        # destabilisation drives the bimodality observed in Phases V/VI.
+        _re_prob_cfg = float(getattr(args, 'random_episode_prob', 0.0) or 0.0)
+        _explore_prob_cfg = float(getattr(args, 'explore_random_prob', 0.0) or 0.0)
+        _warmup_steps = int(getattr(args, 'explore_warmup_steps', 0) or 0)
+        # Active values (used at rollout time); the cfg values stay constant.
+        _re_prob = _re_prob_cfg
+        _explore_prob = _explore_prob_cfg
+        if _re_prob > 0.0:
+            random_episode_flags = (np.random.rand(num_envs) < _re_prob)
+        else:
+            random_episode_flags = np.zeros(num_envs, dtype=bool)
         curr_obs = torch.from_numpy(curr_obs_np).float()
         ep_rewards = [[] for _ in range(num_envs)]
         steps_per_update = args.batch_size // num_envs
@@ -405,6 +422,37 @@ def train(args, encoder_model=None):
 
     n_batches = int(np.ceil(args.mf_steps / args.batch_size))
     step = 0
+
+    # Phase VIII-C: pre-collect a static random-action buffer for WM-only
+    # training. Encoder gets gradient from this WM loss in addition to its
+    # normal PPO + WM-aux gradients during joint training.
+    random_wm_buffer = None
+    if getattr(args, 'random_wm_buffer_eps', 0) > 0 and use_world_model:
+        print(f"[Phase VIII-C] collecting {args.random_wm_buffer_eps} random episodes for WM buffer...")
+        rand_env = make_env(args.env_name, max_steps=getattr(args, 'env_max_steps', 200))
+        rwm_obs, rwm_acts, rwm_next_obs = [], [], []
+        for _ep in range(args.random_wm_buffer_eps):
+            r = rand_env.reset()
+            obs = r[0] if isinstance(r, tuple) else r
+            done = False
+            while not done:
+                a = int(np.random.randint(rand_env.action_space.n))
+                sr = rand_env.step(a)
+                next_obs = sr[0] if isinstance(sr, tuple) else sr
+                done = sr[2] if len(sr) >= 3 else False
+                if len(sr) == 5: done = done or sr[3]
+                rwm_obs.append(torch.from_numpy(obs).float())
+                rwm_acts.append(a)
+                rwm_next_obs.append(torch.from_numpy(next_obs).float())
+                obs = next_obs
+            if (_ep + 1) % 100 == 0:
+                print(f"  [Phase VIII-C] {_ep + 1}/{args.random_wm_buffer_eps} eps, {len(rwm_acts)} transitions")
+        random_wm_buffer = {
+            'obs':      torch.stack(rwm_obs),
+            'acts':     torch.tensor(rwm_acts, dtype=torch.long),
+            'next_obs': torch.stack(rwm_next_obs),
+        }
+        print(f"[Phase VIII-C] buffer ready: {len(rwm_acts)} transitions")
 
     for _batch in tqdm(range(n_batches)):
         # During rollout, ALWAYS eval encoder unless training is explicitly needed.
@@ -427,6 +475,15 @@ def train(args, encoder_model=None):
             next_obs_list, rewards_list, gammas_list = [], [], []
             sem_grids_list = []   # semantic labels for curr_obs at each step
 
+            n_actions_env = vec_env.envs[0].action_space.n
+            # Phase VII: gate injection by warmup. While step < warmup, both
+            # injection mechanisms are inactive (override fields locally).
+            if _warmup_steps > 0 and step < _warmup_steps:
+                _re_prob = 0.0
+                _explore_prob = 0.0
+            else:
+                _re_prob = _re_prob_cfg
+                _explore_prob = _explore_prob_cfg
             for _ in range(steps_per_update):
                 with torch.no_grad():
                     states = rollout_enc.encode(
@@ -435,6 +492,27 @@ def train(args, encoder_model=None):
                         return_quantized=vqvae_e2e,
                     )  # (N, latent_dim)
                     acts = Categorical(logits=policy(states)).sample().cpu()  # (N,)
+
+                # Phase III action injection (next paper). For envs in a "random
+                # episode" (random_episode_flags[i] True), override action with
+                # uniform random. Then independently apply per-step ε-greedy
+                # explore_random_prob over remaining envs.
+                if _re_prob > 0.0 or _explore_prob > 0.0:
+                    acts_np = acts.numpy().copy()
+                    if _re_prob > 0.0:
+                        re_mask = random_episode_flags
+                        if re_mask.any():
+                            acts_np[re_mask] = np.random.randint(
+                                0, n_actions_env, size=int(re_mask.sum()))
+                    if _explore_prob > 0.0:
+                        step_mask = (np.random.rand(num_envs) < _explore_prob)
+                        # Don't double-override: only apply step-level on envs not
+                        # already in a random episode.
+                        step_mask &= ~random_episode_flags
+                        if step_mask.any():
+                            acts_np[step_mask] = np.random.randint(
+                                0, n_actions_env, size=int(step_mask.sum()))
+                    acts = torch.from_numpy(acts_np).long()
 
                 next_obs_np, rewards, terminated, truncated, _ = vec_env.step(acts.numpy())
                 dones = terminated | truncated
@@ -494,15 +572,27 @@ def train(args, encoder_model=None):
                 for i in range(num_envs):
                     ep_rewards[i].append(float(rewards[i]))
                     if dones[i]:
+                        # Phase III' (next paper): the just-ended episode's flag is
+                        # what was in effect during the episode. Capture it BEFORE
+                        # resampling for the upcoming episode.
+                        was_random_episode = (
+                            bool(random_episode_flags[i]) if _re_prob > 0.0 else False)
+                        if _re_prob > 0.0:
+                            random_episode_flags[i] = (np.random.rand() < _re_prob)
                         ep_r = float(np.sum(ep_rewards[i]))
                         ep_l = int(len(ep_rewards[i]))
                         ep_rewards[i] = []
 
                         all_episode_rewards.append(ep_r)
                         all_episode_lengths.append(ep_l)
-                        recent_rewards.append(ep_r)
-                        if len(recent_rewards) > reward_window:
-                            recent_rewards.pop(0)
+                        # Exclude random-action episodes from the rolling reward
+                        # window: they're for WM training data only, not policy
+                        # quality measurement. Keeps best-model tracking honest
+                        # under random_episode_prob > 0.
+                        if not was_random_episode:
+                            recent_rewards.append(ep_r)
+                            if len(recent_rewards) > reward_window:
+                                recent_rewards.pop(0)
 
                         current_avg_reward = float(np.mean(recent_rewards))
                         if (len(recent_rewards) >= reward_window) and (current_avg_reward > best_avg_reward) and (current_avg_reward > 0.0):
@@ -610,6 +700,15 @@ def train(args, encoder_model=None):
                     act_dist = Categorical(logits=act_logits)
                     act_tensor = act_dist.sample().cpu()
                     act_int = int(act_tensor.item())
+
+                    # Phase III action-diversity injection (next paper §5).
+                    # With prob explore_random_prob, override with a uniform random
+                    # action so the WM training buffer retains action diversity even
+                    # as PPO converges. PPO sees mildly off-policy data.
+                    if getattr(args, 'explore_random_prob', 0.0) > 0.0:
+                        if np.random.rand() < args.explore_random_prob:
+                            act_int = int(np.random.randint(env.action_space.n))
+                            act_tensor = torch.tensor(act_int)
 
                 batch_data['obs'].append(curr_obs)
                 batch_data['states'].append(state.squeeze(0))
@@ -740,6 +839,25 @@ def train(args, encoder_model=None):
                     run_stats[k].append(v)
                 else:
                     run_stats[k].append(v.item())
+
+            # Phase VIII-C: extra WM-only gradient steps on the random buffer.
+            # Each step samples a fresh minibatch and updates encoder + trans_model
+            # via the WM aux loss (no PPO loss). Decouples the WM training data
+            # source from the PPO rollout distribution.
+            if random_wm_buffer is not None:
+                rwm_steps = getattr(args, 'random_wm_per_update', 0)
+                rwm_bs = getattr(args, 'random_wm_batch_size', 256)
+                if rwm_steps > 0:
+                    _N = random_wm_buffer['acts'].shape[0]
+                    _wm_losses = []
+                    for _ in range(rwm_steps):
+                        idx = torch.randint(0, _N, (rwm_bs,))
+                        obs_mb = random_wm_buffer['obs'][idx].to(args.device)
+                        acts_mb = random_wm_buffer['acts'][idx].to(args.device)
+                        next_obs_mb = random_wm_buffer['next_obs'][idx].to(args.device)
+                        _wm_losses.append(ppo.train_wm_only(obs_mb, acts_mb, next_obs_mb))
+                    if _wm_losses:
+                        run_stats['wm_only_loss'].append(float(np.mean(_wm_losses)))
 
         # ── Online transition model training (standalone, optional) ──
         # Train the world model with its own optimizer on the same real data PPO just used.

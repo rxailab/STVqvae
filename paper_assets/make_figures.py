@@ -41,7 +41,11 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-ROOT = Path("/home/xiar3/experiments/STVqvae")
+import os as _os
+ROOT = Path(_os.environ.get(
+    "STVQVAE_ROOT",
+    "/mmfs1/storage/users/xiar3/exp/STVqvae",
+))
 FIG_DIR = ROOT / "paper_assets" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -49,6 +53,9 @@ REPROBE_CSV = ROOT / "logs" / "wm_multistep" / "reprobe_summary.csv"
 SWEEP_DK8_CSV = ROOT / "logs" / "sweep" / "sweep_results_v2.csv"
 SWEEP_DK16_CSV = ROOT / "logs" / "sweep_dk16" / "sweep_dk16_results_v2.csv"
 JSON_DIR = ROOT / "logs" / "wm_multistep"
+
+# Phase A apples-to-apples pool (108 ckpts, 5 metrics)
+PHASEA_CSV = ROOT / "logs" / "phaseA" / "phaseA_summary.csv"
 
 # ---------------------------------------------------------------------------
 # Style — single source of truth for every figure in this paper
@@ -570,9 +577,9 @@ def fig5_deadcode_dissociation():
 # Figure 6 — Pooled bootstrap-CI Pearson r vs horizon (headline of §4.5)
 # ---------------------------------------------------------------------------
 def fig6_pearson_pooled_bootstrap():
-    """Story: across all 26 valid checkpoints, the pooled correlation
-    brackets zero at every horizon, and the proxy regime (r >= 0.8) is
-    decisively excluded."""
+    """Pooled across-class Pearson r between probe accuracy and WM accuracy
+    at horizons {1,3,5,10}. Per-encoder lines are de-emphasised context;
+    pooled estimate (with 95% bootstrap CI) is the headline."""
     runs = _load_pearson_jsons()
     horizons = [1, 3, 5, 10]
     x = np.array(horizons, dtype=float)
@@ -582,34 +589,35 @@ def fig6_pearson_pooled_bootstrap():
         if r["env"] == "dk8" and r["enc"] in ENCODERS:
             by_enc[r["enc"]].append(r)
 
-    fig, ax = plt.subplots(figsize=(6.0, 3.8))
+    fig, ax = plt.subplots(figsize=(6.2, 3.6))
 
-    # Subtle "strong proxy" regime band at top — what a usable proxy looks like
-    ax.axhspan(0.8, 1.0, color=PAL["faint"], alpha=0.5, zorder=0)
-    ax.text(10.6, 0.90, '"strong proxy"\nregime ($r{\geq}0.8$)',
-            fontsize=8.5, color=PAL["rule"], va="center", ha="right")
+    # Reference rules: zero (anti-correlation boundary) and r=+0.5 (the
+    # claim the paper actually defends — "no CI above +0.5"). We do NOT
+    # use r=0.8 here because the paper does not claim that threshold; the
+    # tighter +0.5 line is what the data falsifies.
+    ax.axhline(0,    color=PAL["ink"],  lw=0.9, zorder=1)
+    ax.axhline(0.5,  color=PAL["rule"], lw=0.8,
+               ls=(0, (3, 3)), zorder=1)
+    ax.text(10.4, 0.52, "proxy regime above ($r{\geq}0.5$)",
+            fontsize=8.5, color=PAL["rule"], va="bottom", ha="right")
 
-    # Solid zero reference line
-    ax.axhline(0, color=PAL["ink"], lw=0.9, zorder=1)
-
-    # Per-encoder DK-8 curves — de-emphasised context
+    # Per-encoder curves — thin, faint context. No CI bands here: they
+    # produced a muddy overlap region in earlier renders. Per-encoder
+    # bands live in the appendix table.
     for enc in ENCODERS:
         rows = by_enc[enc]
         if not rows:
             continue
-        means, los, his = [], [], []
+        means = []
         for k in horizons:
             vals = [r["r"][k] for r in rows if k in r["r"]]
-            m, lo, hi = _bootstrap_mean_ci(vals)
-            means.append(m); los.append(lo); his.append(hi)
-        means = np.array(means); los = np.array(los); his = np.array(his)
-        ax.plot(x, means, marker=ENC_MARKER[enc], lw=1.2,
-                color=ENC_COLOR[enc], alpha=0.55, markersize=5,
+            m, _lo, _hi = _bootstrap_mean_ci(vals)
+            means.append(m)
+        ax.plot(x, np.array(means), marker=ENC_MARKER[enc], lw=0.9,
+                color=ENC_COLOR[enc], alpha=0.55, markersize=4,
                 label=f"{ENC_LABEL[enc]} (n={len(rows)})", zorder=3)
-        ax.fill_between(x, los, his, color=ENC_COLOR[enc],
-                        alpha=0.10, zorder=2)
 
-    # Pooled across all 26 valid checkpoints — the headline, in ink
+    # Pooled — the headline, in solid black with the only visible CI band.
     pooled_m, pooled_lo, pooled_hi = [], [], []
     for k in horizons:
         vals = [r["r"][k] for r in runs if k in r["r"]]
@@ -620,38 +628,33 @@ def fig6_pearson_pooled_bootstrap():
     pooled_hi = np.array(pooled_hi)
 
     ax.fill_between(x, pooled_lo, pooled_hi, color=PAL["ink"],
-                    alpha=0.18, zorder=4, label="pooled 95% CI")
+                    alpha=0.18, zorder=4,
+                    label=f"pooled 95% CI (n={len(runs)})")
     ax.plot(x, pooled_m, color=PAL["ink"], lw=2.6, marker="o",
-            markersize=7, zorder=5,
-            label=f"POOLED across 26 runs")
+            markersize=6, zorder=5, label="pooled mean")
 
     ax.set_xticks(horizons)
     ax.set_xlabel("rollout horizon $k$")
     ax.set_ylabel(r"across-class Pearson $r$  (probe vs WM$_k$)")
-    ax.set_ylim(-1.0, 1.0)
-    ax.set_xlim(0.6, 11.5)
-    ax.grid(True, axis="y")
+    ax.set_ylim(-0.6, 0.9)            # tightened from [-1, 1]
+    ax.set_xlim(0.6, 11.0)
+    ax.grid(True, axis="y", alpha=0.4)
 
-    # Annotate the pooled value at k=10 with a small text label
-    ax.annotate(f"pooled $r{{=}}{pooled_m[-1]:+.2f}$\n"
-                f"95% CI [{pooled_lo[-1]:+.2f}, {pooled_hi[-1]:+.2f}]",
-                xy=(10, pooled_m[-1]), xytext=(7.2, -0.55),
-                fontsize=9, color=PAL["ink"],
+    ax.annotate(f"pooled $r{{=}}{pooled_m[-1]:+.2f}$ "
+                f"[{pooled_lo[-1]:+.2f}, {pooled_hi[-1]:+.2f}]",
+                xy=(10, pooled_m[-1]), xytext=(6.5, -0.45),
+                fontsize=8.5, color=PAL["ink"],
                 arrowprops=dict(arrowstyle="-",
-                                color=PAL["ink"], lw=0.6))
+                                color=PAL["ink"], lw=0.5))
 
-    # Move legend outside plot to the right — keeps the data area clean
-    # and avoids overlap with the v2/v6 traces that hover near the legend
-    # corners.
-    ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
-              frameon=False, fontsize=8.5, handlelength=1.6)
+    # Legend below the axis, single row, frameless.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.20),
+              ncol=3, frameon=False, fontsize=8.5, handlelength=1.8)
 
-    ax.set_title("Pooled correlation across 26 runs is near zero "
-                 "and excludes the proxy regime",
-                 fontsize=11.5, fontweight="bold")
+    # No in-figure title: the caption is owned by LaTeX.
     fig.tight_layout()
     out = FIG_DIR / "fig6_pearson_pooled_bootstrap.pdf"
-    fig.savefig(out)
+    fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"wrote {out}")
 
@@ -662,6 +665,239 @@ def fig6_pearson_pooled_bootstrap():
 
 
 # ---------------------------------------------------------------------------
+def fig7_apples_to_apples_pooled():
+    """Pooled bootstrap CIs across 5 metrics x 2 class subsets x horizons {1,5,10}.
+    Source: phaseA_summary.csv (108 ckpts; 100 with WM)."""
+    if not PHASEA_CSV.exists():
+        print(f"skip fig7: missing {PHASEA_CSV}")
+        return
+    df = pd.read_csv(PHASEA_CSV)
+
+    # Build 5-class and 4-class Pearson per row from the per-class accuracies.
+    classes_5 = ["wall", "door", "key", "goal", "agent"]
+    classes_4 = ["wall", "door", "key", "agent"]
+    metric_columns = {
+        "exact":    "wm_exact",
+        "probe E1": "wm_probe",
+        "class E2": "wm_class",
+        "centr E3": "wm_centroid",
+        "swap E6":  "wm_swap",
+    }
+
+    def per_row_corr(row, metric_col, class_set):
+        xs, ys = [], []
+        for c in class_set:
+            p = row.get(f"probe_{c}")
+            w = row.get(f"{metric_col}_{c}")
+            if pd.notna(p) and pd.notna(w):
+                xs.append(p); ys.append(w)
+        if len(xs) < 3:
+            return np.nan
+        a = np.array(xs); b = np.array(ys)
+        if a.std() < 1e-9 or b.std() < 1e-9:
+            return np.nan
+        return float(np.corrcoef(a, b)[0, 1])
+
+    rng = np.random.default_rng(0)
+    fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.8), sharey=True)
+    horizons = [1, 5, 10]
+    metric_labels = list(metric_columns.keys())
+    x_pos = np.arange(len(metric_labels))
+
+    for axi, k in enumerate(horizons):
+        sub = df[df["k"] == k]
+        ax = axes[axi]
+        for j, m_label in enumerate(metric_labels):
+            mcol = metric_columns[m_label]
+            for off, cls_set, color, edge in [
+                (-0.18, classes_5, "#9bc6c4", "#3b7d7a"),  # 5-class teal
+                (+0.18, classes_4, "#d8a98c", "#9c4f1f"),  # 4-class warm
+            ]:
+                rs = sub.apply(lambda r: per_row_corr(r, mcol, cls_set), axis=1).dropna().values
+                if len(rs) == 0:
+                    continue
+                # bootstrap mean CI
+                boot = np.array([rng.choice(rs, size=len(rs), replace=True).mean()
+                                 for _ in range(2000)])
+                lo, hi = np.percentile(boot, [2.5, 97.5])
+                m = float(rs.mean())
+                ax.errorbar(j + off, m, yerr=[[m - lo], [hi - m]],
+                            fmt="o", color=edge, ecolor=edge,
+                            markerfacecolor=color, markersize=6,
+                            elinewidth=1.3, capsize=3, capthick=1.1)
+        ax.axhline(0, color="0.5", lw=0.8, ls="--", alpha=0.6)
+        ax.axhspan(0.8, 1.05, color="#e6f0e4", alpha=0.4, zorder=0)
+        ax.set_ylim(-0.7, 1.05)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(metric_labels, rotation=20, ha="right", fontsize=9)
+        ax.set_title(f"k = {k}", fontsize=10.5)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        if axi == 0:
+            ax.set_ylabel("pooled across-class Pearson r\n(95% bootstrap CI)", fontsize=10)
+
+    # Legend below the panels to avoid overlapping the data points (the k=10
+    # panel's lower-right region was crowded by the no-goal CIs near r=-0.5).
+    legend_handles = [
+        plt.Line2D([], [], marker="o", color="#3b7d7a",
+                   markerfacecolor="#9bc6c4", markersize=6, lw=0,
+                   label="5-class (wall, door, key, goal, agent)"),
+        plt.Line2D([], [], marker="o", color="#9c4f1f",
+                   markerfacecolor="#d8a98c", markersize=6, lw=0,
+                   label="4-class (goal excluded)"),
+    ]
+    fig.legend(handles=legend_handles, loc="lower center",
+               bbox_to_anchor=(0.5, -0.04), ncol=2,
+               frameon=False, fontsize=9)
+    fig.suptitle("Apples-to-apples Pearson r across 100 ckpts: "
+                 "no metric, class subset, or horizon reaches the proxy regime",
+                 fontsize=11.5, fontweight="bold", y=1.02)
+    # Reserve space at the bottom for the legend so it doesn't get clipped
+    # and doesn't overlap the panels.
+    fig.tight_layout(rect=[0, 0.06, 1, 1])
+    out = FIG_DIR / "fig7_apples_to_apples_pooled.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
+def fig8_oracle_gap_closure():
+    """Bar plot: probe vs online-WM vs oracle-WM accuracy on door/key/agent.
+    Source: per-checkpoint phaseE oracle JSONs + matching phaseA JSONs."""
+    import json as _json2
+    oracle_dir = ROOT / "logs" / "phaseE" / "oracle_analyzer"
+    phaseA_dir = ROOT / "logs" / "phaseA"
+    if not oracle_dir.exists():
+        print(f"skip fig8: missing {oracle_dir}")
+        return
+
+    def by_name(d, name):
+        if not d: return None
+        for v in d.values():
+            if isinstance(v, dict) and v.get("name") == name:
+                return v.get("acc")
+        return None
+
+    # Index Phase A by short ckpt name
+    phaseA_idx = {}
+    for fp in phaseA_dir.glob("*.json"):
+        name = fp.stem.split("__")[-1]
+        phaseA_idx[name] = fp
+
+    rows = []
+    for fp in sorted(oracle_dir.glob("oracle_*.json")):
+        if "_randonly" in fp.stem:
+            continue
+        base = fp.stem.replace("oracle_", "")
+        src = phaseA_idx.get(base)
+        if not src:
+            continue
+        d_src = _json2.load(open(src))
+        d_or = _json2.load(open(fp))
+        probe = d_src.get("probe_acc_per_class", {})
+        online = d_src.get("wm_acc_per_class_per_horizon", {}).get("1", {})
+        oracle = d_or.get("wm_acc_per_class_per_horizon", {}).get("1", {})
+        for cls in ["door", "key", "agent"]:
+            rows.append({
+                "ckpt": base,
+                "encoder": "v6" if "v6" in base else "vae" if "vae" in base else "v5dc" if "v5dc" in base else "?",
+                "class": cls,
+                "probe":  by_name(probe,  cls),
+                "online": by_name(online, cls),
+                "oracle": by_name(oracle, cls),
+            })
+    if not rows:
+        print("skip fig8: no usable oracle ckpts")
+        return
+    df = pd.DataFrame(rows)
+
+    # Larger panels, taller figure so the data dominates the canvas.
+    fig, axes = plt.subplots(1, 3, figsize=(10.5, 4.2), sharey=True)
+    classes = ["door", "key", "agent"]
+    bar_w = 0.26
+    enc_order = ["v5dc", "v6", "vae"]
+    # ColorBrewer Dark2-inspired, colorblind-safe and print-friendly:
+    # probe = neutral light gray, online-WM = vivid orange (so the near-zero
+    # bars are still visible), oracle-WM = dark teal.
+    palette = {
+        "probe":  "#bdbdbd",   # neutral light gray
+        "online": "#d95f02",   # vivid orange
+        "oracle": "#1b6e73",   # dark teal
+    }
+    label_map = {"probe": "probe", "online": "online WM",
+                 "oracle": "oracle WM (offline-trained)"}
+
+    # Track how many (encoder, class) cells the oracle matches/exceeds probe.
+    n_cells_total = 0
+    n_cells_oracle_meets = 0
+
+    for axi, cls in enumerate(classes):
+        ax = axes[axi]
+        sub = df[df["class"] == cls]
+        for j, enc in enumerate(enc_order):
+            grp = sub[sub["encoder"] == enc]
+            if grp.empty:
+                continue
+            cell_means = {}
+            for k, key in enumerate(["probe", "online", "oracle"]):
+                vals = grp[key].dropna().values
+                if len(vals) == 0:
+                    continue
+                m = float(vals.mean())
+                s = float(vals.std()) if len(vals) > 1 else 0.0
+                cell_means[key] = m
+                xpos = j + (k - 1) * bar_w
+                ax.bar(xpos, m, bar_w,
+                       color=palette[key],
+                       edgecolor="0.15", linewidth=0.7,
+                       yerr=s if len(vals) > 1 else None,
+                       error_kw=dict(elinewidth=1.4, ecolor="0.2", capsize=2.5,
+                                     capthick=1.2))
+                # Annotate near-zero online-WM bars with their value so the
+                # "online WM is at chance" message is legible in print.
+                if key == "online" and m < 0.06:
+                    ax.text(xpos, m + 0.025, f"{m:.02f}",
+                            ha="center", va="bottom", fontsize=8,
+                            color=palette["online"])
+            if "probe" in cell_means and "oracle" in cell_means:
+                n_cells_total += 1
+                # Treat "matches" as oracle within 0.02 of probe.
+                if cell_means["oracle"] >= cell_means["probe"] - 0.02:
+                    n_cells_oracle_meets += 1
+        ax.set_xticks(range(len(enc_order)))
+        ax.set_xticklabels(enc_order, fontsize=11)
+        ax.tick_params(axis="y", labelsize=10)
+        ax.set_title(cls, fontsize=12, fontweight="bold")
+        ax.set_ylim(0, 1.10)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        if axi == 0:
+            ax.set_ylabel("per-class accuracy", fontsize=11)
+
+    print(f"[fig8] oracle matches/exceeds probe in "
+          f"{n_cells_oracle_meets} of {n_cells_total} (encoder, class) cells")
+
+    # Figure-level legend below the panels — out of the data area.
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor=palette[k],
+                      edgecolor="0.15", linewidth=0.7, label=label_map[k])
+        for k in ["probe", "online", "oracle"]
+    ]
+    fig.legend(handles=legend_handles, loc="lower center",
+               bbox_to_anchor=(0.5, -0.02), ncol=3,
+               frameon=False, fontsize=11)
+    # NO suptitle: the LaTeX \caption{} carries that text. Reserve a little
+    # bottom space for the legend.
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    out = FIG_DIR / "fig8_oracle_gap_closure.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(str(out).replace(".pdf", "_preview-1.png"), dpi=150,
+                bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {out}")
+
+
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     fig1_probe_vs_wm_scatter()
     fig2_perclass_bars_dk8()
@@ -669,4 +905,6 @@ if __name__ == "__main__":
     fig4_dk8_vs_dk16()
     fig5_deadcode_dissociation()
     fig6_pearson_pooled_bootstrap()
+    fig7_apples_to_apples_pooled()
+    fig8_oracle_gap_closure()
     print("\nall figures written to", FIG_DIR)

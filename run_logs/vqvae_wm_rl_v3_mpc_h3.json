@@ -1,0 +1,13 @@
+{
+  "env_name": "MiniGrid-LavaCrossingS9N1-v0",
+  "model_path": "/home/xiar3/experiments/STVqvae/discrete_mbrl/model_free/models/MiniGrid-LavaCrossingS9N1-v0/vqvae_preinit_snapback_ppo_best_model.pt",
+  "trans_model_hash": "2001523b4a77386bf05b84a00c2f80de",
+  "horizon": 3,
+  "n_episodes": 25,
+  "reward_mean": 0.0,
+  "reward_std": 0.0,
+  "length_mean": 237.6,
+  "length_std": 204.8076170458511,
+  "success_rate": 0.0,
+  "n_success": 0
+}

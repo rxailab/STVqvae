@@ -1,0 +1,23 @@
+% Phase D: imagined-return vs actual-return rank correlation under the trained policy.
+% 20 working-policy DK-8 ckpts; 100 trained-policy episodes per ckpt.
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{l c c c c c}
+\hline
+encoder & $N$ & succ & $\bar V(z^\star_0)$ & $\bar G_{\text{real}}$ & rank\_corr ($K{=}10$) \\
+\hline
+\encVQGoal       & 5 & 65\% & $+0.67$ & $+0.55$ & $+0.06\pm0.18$ \\
+\encSpatialVAE   & 5 & 57\% & $+0.55$ & $+0.48$ & $+0.07\pm0.07$ \\
+\encVQRestart    & 2 & 91\% & $+0.84$ & $+0.77$ & $-0.09\pm0.26$ \\
+\encVQBase       & 5 & 91\% & $+0.84$ & $+0.78$ & $+0.00\pm0.21$ \\
+\encVQNoRestart  & 3 & 91\% & $+0.84$ & $+0.78$ & $-0.02\pm0.10$ \\
+\encVQWide       & 3 & 89\% & $+0.84$ & $+0.76$ & $-0.02\pm0.15$ \\
+\hline
+\multicolumn{6}{l}{\textbf{Pooled across 20 ckpts: rank\_corr $= +0.007\pm0.154$\,;  17/20 ckpts have $|r|\leq 0.2$.}} \\
+\hline
+\end{tabular}
+\caption{Imagined-return vs actual-return rank correlation across working-policy DK-8 checkpoints. For each starting state, the imagined return $\hat G_0 = \sum_{k} (\prod \hat\gamma) \hat r_k + (\prod \hat\gamma) V_\eta(\hat z_K)$ is computed by free-running the WM with its own per-step reward and discount heads plus a bootstrap with the trained value head; the actual return is $G_0 = \sum_t \gamma^t r_t$ along the env trajectory. The Pearson correlation between $\hat G_0$ and $G_0$ across episodes is the planning-relevant quantity. Every encoder family returns a near-zero rank correlation, with the pooled mean statistically indistinguishable from zero. The trained value head is itself well-calibrated on the true initial state ($\bar V(z^\star_0) \approx \bar G_{\text{real}}$ in every row). The dysfunction is therefore specific to the WM-rolled imagined return: a planner querying these WMs to rank candidate actions receives noise.}
+\label{tab:planning-rank}
+\end{table}

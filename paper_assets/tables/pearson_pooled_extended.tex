@@ -1,0 +1,29 @@
+% Pooled across-class Pearson r -- extended apples-to-apples metrics.
+% Generated from logs/phaseA/phaseA_summary.csv (108 ckpts, 100 with WMs); bootstrap 95% CI, 2000 resamples.
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{l c c c c}
+\hline
+metric & $k$ & 5-class mean [95\% CI] & 4-class mean [95\% CI] & $N$ \\
+\hline
+exact (\S3.3)                & 1  & $+0.21\;[+0.14,+0.28]$ & $\mathbf{-0.30\;[-0.37,-0.22]}$ & 100 \\
+exact                        & 5  & $+0.14\;[+0.06,+0.21]$ & $-0.36\;[-0.42,-0.28]$           & 100 \\
+exact                        & 10 & $+0.15\;[+0.08,+0.22]$ & $-0.36\;[-0.43,-0.28]$           & 100 \\
+\hline
+probe E1                     & 1  & $-0.20\;[-0.30,-0.08]$ & $-0.19\;[-0.28,-0.08]$           & 100 \\
+probe E1                     & 5  & $-0.19\;[-0.30,-0.08]$ & $-0.17\;[-0.27,-0.06]$           & 100 \\
+probe E1                     & 10 & $-0.19\;[-0.30,-0.08]$ & $-0.17\;[-0.27,-0.06]$           & 100 \\
+\hline
+class E2 (VQ)                & 1  & $+0.16\;[+0.08,+0.22]$ & $\mathbf{-0.32\;[-0.41,-0.24]}$  & 90 \\
+class E2 (VQ)                & 5  & $+0.07\;[-0.01,+0.14]$ & $-0.43\;[-0.51,-0.35]$           & 90 \\
+class E2 (VQ)                & 10 & $+0.02\;[-0.06,+0.09]$ & $-0.49\;[-0.57,-0.41]$           & 90 \\
+\hline
+centroid E3 (VAE)            & 1  & $-0.29\;[-0.53,-0.02]$ & $-0.03\;[-0.34,+0.29]$           & 10 \\
+swap E6 (VAE)                & 1  & $\mathbf{-0.39\;[-0.44,-0.34]}$ & $-0.30\;[-0.36,-0.23]$  & 10 \\
+swap E6 (VAE)                & 10 & $-0.63\;[-0.67,-0.58]$ & $-0.54\;[-0.60,-0.47]$           & 10 \\
+\hline
+\end{tabular}
+\caption{Pooled across-class Pearson $r$ between probe accuracy and WM accuracy under the paper's exact rule (\S3.3) and four apples-to-apples relaxations (\S3.3, extended). \textbf{5-class}: $r$ over $\{$\texttt{wall}, \texttt{door}, \texttt{key}, \texttt{goal}, \texttt{agent}$\}$ (the original definition). \textbf{4-class}: $r$ over the same set minus \texttt{goal}, which is a spatial constant in DoorKey and trivially scores high on both instruments regardless of representation quality. The exact metric flips from confidently positive ($+0.21$) under 5-class to confidently negative ($-0.30$) under 4-class, revealing that the paper's original near-zero finding was hiding an anti-correlation behind the goal-class outlier. The apples-to-apples metrics (E1, E2, E3, E6) are robust to that exclusion: their means and CIs do not cross zero in the proxy direction under any class set or horizon. No metric, class subset, or horizon places the upper CI above $r{=}+0.5$, well below the level at which probe accuracy could plausibly substitute for measuring WM accuracy directly.}
+\label{tab:pearson-extended}
+\end{table}

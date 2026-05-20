@@ -30,6 +30,7 @@ import json
 import os
 import sys
 import types
+from collections import Counter
 
 import numpy as np
 import torch
@@ -126,23 +127,35 @@ def load_checkpoint(model_path, device):
                     return_logits=False,
                 )
             else:  # continuous
-                from shared.models.transition_models import ContinuousTransitionModel
-                latent_dim = ae_model.latent_dim
-                hidden = getattr(margs, 'trans_hidden', 256)
-                depth  = getattr(margs, 'trans_depth', 3)
-                trans_model = ContinuousTransitionModel(
-                    latent_dim, env.action_space,
-                    hidden_sizes=[hidden] * depth,
-                    stochastic=getattr(margs, 'stochastic', None),
-                    stoch_hidden_sizes=[256, 256],
-                    discretizer_hidden_sizes=[256],
-                )
+                # Detect optional ConvNet architecture override (caveat-3 sweep)
+                arch = getattr(margs, 'oracle_arch', 'mlp')
+                if arch == 'spatial_conv':
+                    sys.path.insert(0, os.path.dirname(__file__))
+                    from train_conv_oracle_wm import SpatialConvTransitionModel
+                    trans_model = SpatialConvTransitionModel(
+                        encoder_out_shape=ae_model.encoder_out_shape,
+                        n_actions=env.action_space.n,
+                        hidden=getattr(margs, 'conv_hidden', 64),
+                        depth=getattr(margs, 'conv_depth', 3),
+                    )
+                else:
+                    from shared.models.transition_models import ContinuousTransitionModel
+                    latent_dim = ae_model.latent_dim
+                    hidden = getattr(margs, 'trans_hidden', 256)
+                    depth  = getattr(margs, 'trans_depth', 3)
+                    trans_model = ContinuousTransitionModel(
+                        latent_dim, env.action_space,
+                        hidden_sizes=[hidden] * depth,
+                        stochastic=getattr(margs, 'stochastic', None),
+                        stoch_hidden_sizes=[256, 256],
+                        discretizer_hidden_sizes=[256],
+                    )
             trans_model.load_state_dict(ckpt['trans_model_state_dict'])
             trans_model = trans_model.to(device).eval()
             print(f"Transition model ({trans_model_type}) loaded "
                   f"({sum(p.numel() for p in trans_model.parameters()):,} params)")
         except Exception as e:
-            print(f"  ⚠ Could not load transition model: {e}")
+            print(f"  WARN: could not load transition model: {e}")
             trans_model = None
 
     print(f"Encoder {ae_model_type} v{ae_version}, "
@@ -434,6 +447,336 @@ def compute_probe_accuracy_per_class(ae_model, env, n_frames, device, n_lat_side
     return per_class
 
 
+# ── Extended (apples-to-apples) metrics: E1/E2/E3/E5/E6 ───────────────────
+#
+# E1  WM_probe       :  apply the SAME logistic probe (fit on z_0) to z_hat_k
+# E2  WM_class (VQ)  :  code->class majority lookup; score class equality
+# E3  WM_centroid    :  arg-max-cosine to per-class centroid (VAE positive control)
+# E5  confusion      :  (true_class@0, probe_pred_class@k) 11x11 histogram
+# E6  WM_swap (VAE)  :  relax exact metric to allow same-class spatial swaps
+# All metrics bucket cells by ground-truth class at t=0 (paper §3.3a).
+
+
+def fit_shared_probe(ae_model, env, n_frames, device, n_lat_side, trans_kind):
+    """Returns (probe, X_NL_D, y_NL, codes_NL_or_None, per_class_recall_dict).
+
+    A single shared logistic regression is fit once on per-token z_0 and reused
+    for E1 (probe-the-WM-output) and for the original probe accuracy report.
+    """
+    from sklearn.linear_model import LogisticRegression
+
+    ae_model.eval()
+    emb_list, sem_list, code_list = [], [], []
+
+    reset_result = env.reset()
+    obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+    obs_t = torch.from_numpy(obs).float()
+
+    for _ in range(n_frames):
+        obs_in = obs_t.unsqueeze(0).to(device)
+        with torch.no_grad():
+            try:
+                flat_emb = ae_model.encode(obs_in, return_quantized=True)
+            except TypeError:
+                flat_emb = ae_model.encode(obs_in)
+
+        latent_dim = flat_emb.shape[-1]
+        L_tokens = n_lat_side * n_lat_side
+        emb_dim = latent_dim // L_tokens
+        emb_list.append(flat_emb.view(L_tokens, emb_dim).cpu().numpy())
+        sem_list.append(semantic_grid(env, n_lat_side).numpy())
+
+        if trans_kind == 'discrete':
+            with torch.no_grad():
+                codes = ae_model.encode(obs_in, return_quantized=False)
+            if codes.dim() == 3:
+                codes = codes.view(1, -1)
+            code_list.append(codes.long().squeeze(0).cpu().numpy())
+
+        a = env.action_space.sample()
+        step_result = env.step(a)
+        obs = step_result[0] if isinstance(step_result, tuple) else step_result
+        done = step_result[2] if len(step_result) >= 3 else False
+        obs_t = torch.from_numpy(obs).float()
+        if done:
+            reset_result = env.reset()
+            obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+            obs_t = torch.from_numpy(obs).float()
+
+    X = np.concatenate(emb_list, axis=0)
+    y = np.concatenate(sem_list, axis=0)
+    codes = np.concatenate(code_list, axis=0) if code_list else None
+
+    probe = LogisticRegression(max_iter=300, class_weight='balanced', C=1.0,
+                               n_jobs=-1)
+    probe.fit(X, y)
+    y_pred = probe.predict(X)
+
+    per_class = {}
+    for c in np.unique(y):
+        mask = y == c
+        n = int(mask.sum())
+        if n < 10:
+            continue
+        per_class[int(c)] = {
+            'acc': float((y_pred[mask] == c).mean()),
+            'count': n,
+            'name': OBJECT_NAMES[int(c)],
+        }
+    return probe, X, y, codes, per_class
+
+
+def build_code_to_class(codes, sem, n_codes):
+    """Majority-vote class label for each code index. Returns (n_codes,) int."""
+    lookup = -np.ones(n_codes, dtype=np.int64)
+    for k in range(n_codes):
+        m = codes == k
+        if not m.any():
+            continue
+        lookup[k] = Counter(sem[m].tolist()).most_common(1)[0][0]
+    return lookup
+
+
+def build_class_centroids(X, y):
+    """Per-class mean embedding from probe data. Returns (centroids, class_ids)."""
+    classes = sorted(int(c) for c in np.unique(y))
+    centroids, class_ids = [], []
+    for c in classes:
+        m = y == c
+        if int(m.sum()) < 10:
+            continue
+        centroids.append(X[m].mean(axis=0))
+        class_ids.append(c)
+    return (np.stack(centroids).astype(np.float32),
+            np.array(class_ids, dtype=np.int64))
+
+
+def _bucket_per_class(correct_RL, sem0_RL):
+    """correct/sem0 each (R, L). Returns {class_id: {acc, count, name}}."""
+    correct = correct_RL.astype(np.float32).reshape(-1)
+    classes = sem0_RL.reshape(-1)
+    out = {}
+    for c in range(N_CLASSES):
+        m = classes == c
+        n = int(m.sum())
+        if n < 10:
+            continue
+        out[int(c)] = {
+            'acc': float(correct[m].mean()),
+            'count': n,
+            'name': OBJECT_NAMES[int(c)],
+        }
+    return out
+
+
+def _score_probe_wm(probe, pred_emb_RLD, sem0_RL):
+    """E1: apply shared probe to predicted continuous embedding; bucket by sem0."""
+    R, L, D = pred_emb_RLD.shape
+    pred_class = probe.predict(pred_emb_RLD.reshape(R * L, D)).reshape(R, L)
+    correct = (pred_class == sem0_RL)
+    return _bucket_per_class(correct, sem0_RL), pred_class
+
+
+def _score_class_vq(pred_idx_RL, gt_idx_RL, code_to_class, sem0_RL):
+    """E2: VQ class-equality via code->class lookup."""
+    pred_cls = code_to_class[pred_idx_RL]
+    gt_cls = code_to_class[gt_idx_RL]
+    correct = (pred_cls == gt_cls) & (pred_cls >= 0)
+    return _bucket_per_class(correct, sem0_RL)
+
+
+def _score_centroid_vae(pred_emb_RLD, centroids_KD, class_ids_K, sem0_RL):
+    """E3: arg-max cosine to class centroids, score class match against sem0."""
+    R, L, D = pred_emb_RLD.shape
+    z = torch.from_numpy(pred_emb_RLD)
+    c = torch.from_numpy(centroids_KD)
+    sims = torch.einsum('rld,kd->rlk',
+                        F.normalize(z, dim=-1),
+                        F.normalize(c, dim=-1))
+    pred_class = class_ids_K[sims.argmax(dim=-1).numpy()]
+    correct = (pred_class == sem0_RL)
+    return _bucket_per_class(correct, sem0_RL)
+
+
+def _score_swap_vae(pred_emb_RLD, gt_emb_RLD, sem_at_k_RL, sem0_RL):
+    """E6: relax exact metric -- a predicted token is correct iff it is cosine-
+    nearest to ANY ground-truth token in the same frame whose class equals
+    the class at that prediction's position (i.e. same-class spatial swaps OK).
+    """
+    R, L, D = pred_emb_RLD.shape
+    p = F.normalize(torch.from_numpy(pred_emb_RLD), dim=-1)
+    g = F.normalize(torch.from_numpy(gt_emb_RLD), dim=-1)
+    sims = torch.einsum('rld,rmd->rlm', p, g)            # (R, L_pred, L_true)
+    nearest_pos = sims.argmax(dim=-1).numpy()             # (R, L)
+    nearest_class = np.take_along_axis(sem_at_k_RL, nearest_pos, axis=1)
+    correct = (nearest_class == sem_at_k_RL)
+    return _bucket_per_class(correct, sem0_RL)
+
+
+def _confusion_11x11(pred_RL, true_RL):
+    """E5: (true@0, predicted@k) histogram, 11x11."""
+    p = pred_RL.reshape(-1)
+    t = true_RL.reshape(-1)
+    cm = np.zeros((N_CLASSES, N_CLASSES), dtype=np.int64)
+    valid = (t >= 0) & (t < N_CLASSES) & (p >= 0) & (p < N_CLASSES)
+    np.add.at(cm, (t[valid], p[valid]), 1)
+    return cm
+
+
+def _class_pearson(probe_per_class, wm_per_class,
+                   classes=('wall', 'door', 'key', 'goal', 'agent')):
+    target_ids = [OBJECT_TO_IDX[n] for n in classes if n in OBJECT_TO_IDX]
+    xs, ys = [], []
+    for cid in target_ids:
+        if cid in probe_per_class and cid in wm_per_class:
+            xs.append(probe_per_class[cid]['acc'])
+            ys.append(wm_per_class[cid]['acc'])
+    if len(xs) < 3:
+        return None
+    return float(np.corrcoef(np.array(xs), np.array(ys))[0, 1])
+
+
+def compute_all_multistep(ae_model, trans_model, trans_kind, env,
+                          n_rollouts, horizons, device, n_lat_side, probe,
+                          code_to_class=None, centroids=None,
+                          centroid_class_ids=None):
+    """Run rollouts ONCE; compute the original WM_exact metric AND the extended
+    E1/E2/E3/E5/E6 metrics. Returns (original_per_h, extended_per_h).
+
+    `original_per_h[k]` matches `compute_multistep_accuracy(...)[k]` exactly
+    (per-class dict with acc/count/name).
+    """
+    max_steps = max(horizons)
+    L = n_lat_side * n_lat_side
+    embedding_dim = getattr(ae_model, 'embedding_dim', None)
+    if embedding_dim is None:
+        embedding_dim = ae_model.latent_dim // L
+
+    pred_emb = {k: [] for k in horizons}
+    gt_emb = {k: [] for k in horizons}
+    pred_idx = {k: [] for k in horizons}
+    gt_idx = {k: [] for k in horizons}
+    sem0 = {k: [] for k in horizons}
+    sem_at_k = {k: [] for k in horizons}
+
+    if trans_kind == 'discrete':
+        try:
+            cb_weight = ae_model.quantizer._embedding.weight.detach().cpu().numpy()
+        except AttributeError as e:
+            raise RuntimeError(
+                f'Cannot find VQ codebook weights on ae_model.quantizer: {e}')
+
+    for r in range(n_rollouts):
+        reset_result = env.reset()
+        obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+        obs_t = torch.from_numpy(obs).float()
+
+        sem_seq = [semantic_grid(env, n_lat_side).numpy()]
+        if trans_kind == 'discrete':
+            codes_seq = [encode_codes(ae_model, obs_t, device)]
+            with torch.no_grad():
+                lat0 = ae_model.encode(obs_t.unsqueeze(0).to(device),
+                                       return_quantized=True)
+            lat_seq = [lat0.view(L, embedding_dim).cpu().numpy()]
+        else:
+            codes_seq = None
+            lat_seq = [encode_latent(ae_model, obs_t, device)
+                       .view(L, embedding_dim).cpu().numpy()]
+
+        actions = []
+        reached = 0
+        for step in range(max_steps):
+            a = env.action_space.sample()
+            actions.append(a)
+            step_result = env.step(a)
+            obs_next = step_result[0] if isinstance(step_result, tuple) else step_result
+            done = step_result[2] if len(step_result) >= 3 else False
+
+            obs_next_t = torch.from_numpy(obs_next).float()
+            sem_seq.append(semantic_grid(env, n_lat_side).numpy())
+            if trans_kind == 'discrete':
+                codes_seq.append(encode_codes(ae_model, obs_next_t, device))
+                with torch.no_grad():
+                    lat = ae_model.encode(obs_next_t.unsqueeze(0).to(device),
+                                          return_quantized=True)
+                lat_seq.append(lat.view(L, embedding_dim).cpu().numpy())
+            else:
+                lat_seq.append(encode_latent(ae_model, obs_next_t, device)
+                               .view(L, embedding_dim).cpu().numpy())
+            reached = step + 1
+            if done:
+                break
+
+        if reached < 1:
+            continue
+
+        if trans_kind == 'discrete':
+            preds = rollout_discrete(trans_model, codes_seq[0],
+                                     actions[:reached], device)
+        else:
+            preds = rollout_continuous(trans_model, ae_model,
+                                       torch.from_numpy(lat_seq[0]).reshape(-1).to(device),
+                                       actions[:reached], device)
+
+        for k in horizons:
+            if k > reached:
+                continue
+            sem0[k].append(sem_seq[0])
+            sem_at_k[k].append(sem_seq[k])
+            gt_emb[k].append(lat_seq[k])
+            if trans_kind == 'discrete':
+                p_idx = preds[k - 1].numpy()
+                pred_idx[k].append(p_idx)
+                gt_idx[k].append(codes_seq[k].numpy())
+                pred_emb[k].append(cb_weight[p_idx])
+            else:
+                pred_emb[k].append(preds[k - 1].view(L, embedding_dim).cpu().numpy())
+
+        if (r + 1) % 50 == 0:
+            print(f'  rollouts: {r + 1}/{n_rollouts}')
+
+    original = {}
+    extended = {}
+    for k in horizons:
+        if not pred_emb[k]:
+            continue
+        pe = np.stack(pred_emb[k])
+        ge = np.stack(gt_emb[k])
+        s0 = np.stack(sem0[k])
+        sk = np.stack(sem_at_k[k])
+
+        if trans_kind == 'discrete':
+            pi = np.stack(pred_idx[k])
+            gi = np.stack(gt_idx[k])
+            correct_exact = (pi == gi)
+        else:
+            p_n = F.normalize(torch.from_numpy(pe), dim=-1)
+            g_n = F.normalize(torch.from_numpy(ge), dim=-1)
+            sims = torch.einsum('rld,rmd->rlm', p_n, g_n)
+            correct_exact = (sims.argmax(dim=-1).numpy()
+                             == np.arange(pe.shape[1])[None, :])
+        original[k] = _bucket_per_class(correct_exact, s0)
+
+        wm_probe, probe_pred = _score_probe_wm(probe, pe, s0)
+        cm = _confusion_11x11(probe_pred, s0)
+
+        ext = {
+            'wm_probe_per_class': wm_probe,
+            'confusion': cm.tolist(),
+        }
+        if trans_kind == 'discrete' and code_to_class is not None:
+            ext['wm_class_per_class'] = _score_class_vq(pi, gi, code_to_class, s0)
+        if trans_kind != 'discrete':
+            if centroids is not None:
+                ext['wm_centroid_per_class'] = _score_centroid_vae(
+                    pe, centroids, centroid_class_ids, s0)
+            ext['wm_swap_per_class'] = _score_swap_vae(pe, ge, sk, s0)
+
+        extended[k] = ext
+
+    return original, extended
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -446,6 +789,8 @@ def main():
     parser.add_argument('--output_json', default=None)
     parser.add_argument('--skip_probe', action='store_true',
                         help="Skip the semantic probe (just run WM)")
+    parser.add_argument('--no_extended', action='store_true',
+                        help="Disable E1/E2/E3/E5/E6 extended metrics (legacy mode)")
     args = parser.parse_args()
 
     ae_model, trans_model, trans_kind, env, margs = load_checkpoint(
@@ -457,21 +802,50 @@ def main():
 
     # ── Probe ──
     probe_acc = {}
+    probe_obj = X_probe = y_probe = codes_buf = None
+    code_to_class = centroids = centroid_class_ids = None
+    extended_per_h = {}
+
     if not args.skip_probe:
         print(f"\nRunning semantic probe ({args.probe_frames} frames)...")
         env2 = make_env(margs.env_name)
-        probe_acc = compute_probe_accuracy_per_class(
-            ae_model, env2, args.probe_frames, args.device, n_lat_side)
+        if args.no_extended:
+            probe_acc = compute_probe_accuracy_per_class(
+                ae_model, env2, args.probe_frames, args.device, n_lat_side)
+        else:
+            probe_obj, X_probe, y_probe, codes_buf, probe_acc = fit_shared_probe(
+                ae_model, env2, args.probe_frames, args.device, n_lat_side, trans_kind)
+            if trans_kind == 'discrete' and codes_buf is not None:
+                n_codes = getattr(margs, 'codebook_size', 64)
+                code_to_class = build_code_to_class(codes_buf, y_probe, n_codes)
+            elif trans_kind != 'discrete':
+                centroids, centroid_class_ids = build_class_centroids(X_probe, y_probe)
 
     # ── Multi-step WM ──
     wm_multi = {}
     if trans_model is not None:
         print(f"\nMulti-step WM rollouts: {args.n_rollouts} × up to {max(args.horizons)} steps")
-        wm_multi = compute_multistep_accuracy(
-            ae_model, trans_model, trans_kind, env,
-            args.n_rollouts, args.horizons, args.device, n_lat_side)
+        if args.no_extended or probe_obj is None:
+            wm_multi = compute_multistep_accuracy(
+                ae_model, trans_model, trans_kind, env,
+                args.n_rollouts, args.horizons, args.device, n_lat_side)
+        else:
+            wm_multi, extended_per_h = compute_all_multistep(
+                ae_model, trans_model, trans_kind, env,
+                args.n_rollouts, args.horizons, args.device, n_lat_side,
+                probe_obj, code_to_class=code_to_class,
+                centroids=centroids, centroid_class_ids=centroid_class_ids)
+            for k, ext in extended_per_h.items():
+                pr = {'probe': _class_pearson(probe_acc, ext.get('wm_probe_per_class', {}))}
+                if 'wm_class_per_class' in ext:
+                    pr['class'] = _class_pearson(probe_acc, ext['wm_class_per_class'])
+                if 'wm_centroid_per_class' in ext:
+                    pr['centroid'] = _class_pearson(probe_acc, ext['wm_centroid_per_class'])
+                if 'wm_swap_per_class' in ext:
+                    pr['swap'] = _class_pearson(probe_acc, ext['wm_swap_per_class'])
+                ext['pearson_r'] = pr
     else:
-        print("\n⚠ No transition model in checkpoint — skipping WM.")
+        print("\nWARN: no transition model in checkpoint -- skipping WM.")
 
     # ── Report ──
     print("\n" + "=" * 80)
@@ -526,6 +900,25 @@ def main():
         s = f"{r:+.3f}" if r is not None else "—"
         print(f"  k={k:2d}: {s}")
 
+    if extended_per_h:
+        print("\nPearson r (probe vs WM_*  --  apples-to-apples extension):")
+        variants = sorted({v for ext in extended_per_h.values()
+                           for v in ext.get('pearson_r', {}).keys()})
+        header = f"  {'k':>3}"
+        for v in variants:
+            header += f"  {v:>10}"
+        print(header)
+        for k in args.horizons:
+            ext = extended_per_h.get(k)
+            if not ext:
+                continue
+            line = f"  {k:>3}"
+            pr = ext.get('pearson_r', {})
+            for v in variants:
+                val = pr.get(v)
+                line += f"  {val:+10.3f}" if val is not None else f"  {'—':>10}"
+            print(line)
+
     # ── Save ──
     result = {
         'model_path': args.model_path,
@@ -544,6 +937,17 @@ def main():
         'rows':         rows,
         'pearson_r_per_horizon': {str(k): v for k, v in corrs.items()},
     }
+    if extended_per_h:
+        result['extended_metrics_per_horizon'] = {
+            str(k): {
+                **{name: ({str(c): v for c, v in d.items()} if isinstance(d, dict) else d)
+                   for name, d in ext.items()
+                   if name not in ('confusion', 'pearson_r')},
+                'confusion': ext['confusion'],
+                'pearson_r': ext.get('pearson_r', {}),
+            }
+            for k, ext in extended_per_h.items()
+        }
     if args.output_json:
         os.makedirs(os.path.dirname(os.path.abspath(args.output_json)), exist_ok=True)
         with open(args.output_json, 'w') as f:

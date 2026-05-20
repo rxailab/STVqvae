@@ -1,0 +1,27 @@
+\begin{table}[h]
+\centering
+\caption{\textbf{Phase R Pareto: causal trade-off across $3$ source encoders.} For each (encoder, $\lambda$) cell we report the auxiliary action-prediction accuracy at the end of fine-tuning, the average per-class probe recall on the resulting encoder, the WM E1 accuracy at $k{=}1$ and $k{=}10$ from a freshly-trained offline WM, the final-epoch reconstruction loss of the fine-tuned encoder (KL is $\le 10^{-4}$ in every cell and omitted), and the absolute action-conditioning components $\|T(z,a){-}T(z,a')\|$ and $\|T(z,a){-}z\|$ from which $\mathrm{action\_dep\_ratio}$ is computed. Per-encoder Pearson($\mathrm{probe\_avg}$, $\mathrm{action\_dep\_ratio}$): \textsc{Spatial-VAE-A} $-0.97$; \textsc{Spatial-VAE-B} $-0.94$; \textsc{Spatial-VAE-C} $-0.66$; pooled across $N{=}12$: $-0.67$. The trade-off is monotonic on \textsc{A} and \textsc{B}; on \textsc{C} the encoder is already partially action-identifiable at $\lambda{=}0$ and reconstruction loss degrades $9\times$ as $\lambda$ rises (last column), so the action signal saturates and the trade-off magnitude is smaller. Reconstruction loss does not collapse on \textsc{A}/\textsc{B}, ruling out objective interference as the only mechanism on those encoders. Internal IDs ($\textsc{A}=$\texttt{vae\_s1}, $\textsc{B}=$\texttt{vae\_s2}, $\textsc{C}=$\texttt{vae\_s3}) are used in artifact filenames only.}
+\label{tab:phase-R-pareto}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l r r r r r r r r r}
+\hline
+Source & $\lambda$ & aux\_acc & probe\_avg & WM E1 ($k{=}1$) & WM E1 ($k{=}10$) & recon & $\|T(z,a){-}T(z,a')\|$ & $\|T(z,a){-}z\|$ & ratio \\
+\hline
+\textsc{Spatial-VAE-A} & $0.0$ (control) & $0.147$ & $\mathbf{0.793}$ & $0.989$ & $0.989$ & $0.0008$ & $0.137$  & $21.8$ & $\mathbf{0.006}$ \\
+                       & $0.5$           & $0.739$ & $0.624$ & $0.986$ & $0.729$ & $0.0001$ & $27.7$   & $51.1$ & $0.543$ \\
+                       & $2.0$           & $0.753$ & $0.604$ & $0.973$ & $0.702$ & $0.0002$ & $27.2$   & $50.7$ & $0.537$ \\
+                       & $10.0$          & $0.746$ & $0.641$ & $0.974$ & $0.677$ & $0.0004$ & $30.5$   & $53.3$ & $0.573$ \\
+\hline
+\textsc{Spatial-VAE-B} & $0.0$ (control) & $0.171$ & $\mathbf{0.830}$ & $1.000$ & $1.000$ & $0.0001$ & $0.134$  & $5.4$  & $\mathbf{0.025}$ \\
+                       & $0.5$           & $0.779$ & $0.682$ & $0.982$ & $0.662$ & $0.0001$ & $39.9$   & $50.4$ & $0.792$ \\
+                       & $2.0$           & $0.785$ & $0.706$ & $0.974$ & $0.641$ & $0.0002$ & $24.6$   & $44.8$ & $0.549$ \\
+                       & $10.0$          & $0.786$ & $0.627$ & $0.973$ & $0.541$ & $0.0002$ & $33.0$   & $45.1$ & $0.732$ \\
+\hline
+\textsc{Spatial-VAE-C} & $0.0$ (control) & $0.122$ & $\mathbf{0.811}$ & $1.000$ & $1.000$ & $0.0000$ & $0.153$  & $4.9$  & $\mathbf{0.032}$ \\
+                       & $0.5$           & $0.622$ & $0.733$ & $0.989$ & $0.550$ & $0.0003$ & $47.2$   & $45.4$ & $1.039$ \\
+                       & $2.0$           & $0.650$ & $0.679$ & $0.982$ & $0.458$ & $0.0005$ & $42.2$   & $38.9$ & $1.087$ \\
+                       & $10.0$          & $0.650$ & $0.533$ & $0.982$ & $0.442$ & $0.0009$ & $47.3$   & $47.4$ & $0.999$ \\
+\hline
+\end{tabular}
+\end{table}
